@@ -27,8 +27,8 @@ The analyst uses the current Interactions API with Gemini 3.8 Flash and falls ba
 ## Controls
 
 - **Start your investigation:** asks permission for microphone and camera; camera denial permits audio-only mode.
-- **Hands-free:** local speech activity detection controls turns. Use headphones if speakers cause echo.
-- **Push to talk:** switch during a round; hold the button or Space/Enter while focused and release to finish a turn.
+- **Hands-free:** microphone audio streams continuously to Gemini's speech detector, which controls turns. The local activity meter is a separate measurement. Use headphones if speakers cause echo.
+- **Push to talk:** switch during a round; microphone audio is sent only while holding the button or Space/Enter while focused. Gemini detects speech pauses; release flushes any remaining audio.
 - **End & assess:** ends capture and obtains the final evidence report.
 - **Cancel round:** releases capture and resets without a verdict.
 - **Explore a sample:** explicitly labeled fixed illustration; no camera, network inference, or real prediction.

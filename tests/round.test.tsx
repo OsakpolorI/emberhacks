@@ -7,6 +7,7 @@ import { insufficient } from '../src/lib/analysis';
 
 type Callbacks = ConstructorParameters<typeof LiveInterview>[1];
 const harness = vi.hoisted(() => ({
+  start: vi.fn(),
   engines: [] as Array<{
     callbacks: Callbacks;
     closed: boolean;
@@ -24,7 +25,7 @@ vi.mock('../src/lib/live', () => ({
     ) {
       harness.engines.push(this);
     }
-    async start() {}
+    start = harness.start;
     stop = vi.fn(() => {
       this.closed = true;
     });
@@ -40,6 +41,7 @@ const reply = () =>
   });
 beforeEach(() => {
   harness.engines.length = 0;
+  harness.start.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => reply()),
@@ -67,6 +69,43 @@ function player(text = 'Yesterday I went to the library with my sister and retur
   });
 }
 describe('actual round lifecycle', () => {
+  it('preserves transcripts received while media startup is still connecting', async () => {
+    harness.start.mockImplementation(async () => {
+      harness.engines[0].callbacks.message({
+        text: undefined,
+        data: undefined,
+        serverContent: { outputTranscription: { text: 'Tell me your story.', finished: true } },
+      });
+      player('I went to the library.');
+    });
+    const { result } = renderHook(() => useRound());
+    await act(() => result.current.start());
+    expect(result.current.state.phase).toBe('interviewing');
+    expect(result.current.state.turns.map((turn) => turn.text)).toEqual([
+      'Tell me your story.',
+      'I went to the library.',
+    ]);
+  });
+
+  it('displays partial input transcripts and completes them on the final fragment', async () => {
+    const { result } = renderHook(() => useRound());
+    await act(() => result.current.start());
+    act(() =>
+      harness.engines[0].callbacks.message({
+        text: undefined,
+        data: undefined,
+        serverContent: { inputTranscription: { text: 'I went' } },
+      }),
+    );
+    expect(result.current.state.turns[0]).toMatchObject({ text: 'I went', completed: false });
+    act(() => player(' to the library.'));
+    expect(result.current.state.turns).toHaveLength(1);
+    expect(result.current.state.turns[0]).toMatchObject({
+      text: 'I went to the library.',
+      completed: true,
+    });
+  });
+
   it('finalizes once even when End is clicked twice', async () => {
     const { result } = renderHook(() => useRound());
     await act(() => result.current.start());

@@ -14,7 +14,6 @@ export class LiveInterview {
   closed = false;
   mode: InputMode;
   private held = false;
-  private activity = false;
   private context: AudioContext | null = null;
   private worklet: AudioWorkletNode | null = null;
   private streams: MediaStream[] = [];
@@ -80,7 +79,13 @@ export class LiveInterview {
         systemInstruction: SYSTEM,
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        realtimeInputConfig: { automaticActivityDetection: { disabled: true } },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            prefixPaddingMs: 300,
+            silenceDurationMs: 800,
+          },
+        },
         tools: [
           {
             functionDeclarations: [
@@ -138,8 +143,9 @@ export class LiveInterview {
       const outputPlaying = this.sources.size > 0;
       const detected = this.meter.sample(rms, now, outputPlaying);
       this.callbacks.signal(rms, detected.speaking, outputPlaying, this.meter);
-      if (this.mode === 'auto' && detected.start) this.beginActivity();
-      const send = this.mode === 'auto' ? this.activity : this.held;
+      // The local meter is only a dashboard measurement. Let Gemini detect
+      // speech from the continuous stream, including quiet words and pauses.
+      const send = this.mode === 'auto' || this.held;
       if (send && this.session) {
         const pcm = new Int16Array(samples.length);
         for (let i = 0; i < samples.length; i++)
@@ -151,7 +157,6 @@ export class LiveInterview {
           },
         });
       }
-      if (this.mode === 'auto' && detected.end) this.endActivity();
     };
     if (camera) {
       const video = document.createElement('video');
@@ -182,30 +187,26 @@ export class LiveInterview {
       turnComplete: true,
     });
   }
-  private beginActivity() {
-    if (this.activity || !this.session) return;
-    this.activity = true;
-    this.session.sendRealtimeInput({ activityStart: {} });
-  }
-  private endActivity() {
-    if (!this.activity || !this.session) return;
-    this.activity = false;
-    this.session.sendRealtimeInput({ activityEnd: {} });
+  private endAudioStream() {
+    if (this.closed) return;
+    // Automatic detection requires audioStreamEnd to flush buffered speech.
+    // The next audio message reopens the stream without reconnecting.
+    this.session?.sendRealtimeInput({ audioStreamEnd: true });
   }
   setMode(mode: InputMode) {
-    this.endActivity();
+    if (mode === this.mode) return;
+    if (this.mode === 'auto' || this.held) this.endAudioStream();
     this.held = false;
     this.mode = mode;
   }
   press() {
-    if (this.mode !== 'ptt' || this.held) return;
+    if (this.closed || this.mode !== 'ptt' || this.held) return;
     this.held = true;
-    this.beginActivity();
   }
   release() {
     if (!this.held) return;
     this.held = false;
-    this.endActivity();
+    this.endAudioStream();
   }
   private play(data: string) {
     const context = this.context;

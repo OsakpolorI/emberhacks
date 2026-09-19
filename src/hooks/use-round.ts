@@ -252,7 +252,12 @@ export function useRound() {
         );
       },
       message: (message) => {
-        if (current.current.id !== id || current.current.phase !== 'interviewing') return;
+        // Live can send transcripts before start() finishes setting up media.
+        if (
+          current.current.id !== id ||
+          !['connecting', 'interviewing'].includes(current.current.phase)
+        )
+          return;
         const c = message.serverContent;
         if (c?.inputTranscription)
           addText('player', c.inputTranscription.text ?? '', !!c.inputTranscription.finished);
