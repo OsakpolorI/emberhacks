@@ -40,10 +40,7 @@ const RIGHT_EAR = [362, 385, 387, 263, 373, 380] as const;
 const NOSE = 1;
 const MOUTH = [13, 14] as const;
 
-export function dist(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): number {
+export function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
@@ -97,7 +94,7 @@ export function summarizeAnswer(
       : null,
   ].filter(Boolean);
   const prompt = elevated
-    ? `Behavioral cue packet for the answer that just finished (game flavor, not proof of lying): ${bits.join('; ')}. If useful, briefly notice one cue in one short clause, then ask exactly ONE content question about the story. Do not say they are caught lying because of blinking or motion. Do not speak numbers aloud. Still call publish_assessment before your question.`
+    ? `Behavioral cue packet for the answer that just finished (approximate game observation, not lie evidence): ${bits.join('; ')}. If useful, briefly name one observable change, then ask exactly ONE content question about what the player said. Never infer emotion, deception, or truth from these cues. Do not speak numbers aloud or include cues in publish_assessment.`
     : `Behavioral cues for the last answer were near baseline. Ignore face cues this turn; ask one content follow-up after publish_assessment.`;
   return { baseline, current, deltas, elevated, labels, prompt };
 }
@@ -140,17 +137,20 @@ export class FaceCueTracker {
       const wasm = await vision.FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm',
       );
-      const landmarker = await vision.FaceLandmarker.createFromOptions(wasm, {
+      const options = (delegate: 'GPU' | 'CPU') => ({
         baseOptions: {
           modelAssetPath:
             'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-          delegate: 'GPU',
+          delegate,
         },
-        runningMode: 'VIDEO',
+        runningMode: 'VIDEO' as const,
         numFaces: 1,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: false,
       });
+      const landmarker = await vision.FaceLandmarker.createFromOptions(wasm, options('GPU')).catch(
+        () => vision.FaceLandmarker.createFromOptions(wasm, options('CPU')),
+      );
       const tracker = new FaceCueTracker();
       tracker.landmarker = landmarker;
       tracker.video = video;
@@ -171,7 +171,10 @@ export class FaceCueTracker {
 
   endAnswer(): FaceCueAnswerSummary | null {
     if (!this.baseline) return null;
-    const elapsedMin = Math.max((performance.now() - this.answerStartedAt) / 60000, 1 / 120);
+    const durationMs = performance.now() - this.answerStartedAt;
+    // Short answers cannot support a meaningful comparison with a baseline.
+    if (durationMs < 4000 || this.answerMotion.length < 15) return null;
+    const elapsedMin = durationMs / 60000;
     const blinks = Math.max(0, this.blinkCount - this.answerBlinkStart);
     const current = {
       blinkRate: blinks / elapsedMin,
@@ -232,8 +235,7 @@ export class FaceCueTracker {
     const blinkScore = (blinkL + blinkR) / 2;
     const jaw = blendshapeScore(categories, 'jawOpen');
 
-    const ear =
-      (eyeAspectRatio(landmarks, LEFT_EAR) + eyeAspectRatio(landmarks, RIGHT_EAR)) / 2;
+    const ear = (eyeAspectRatio(landmarks, LEFT_EAR) + eyeAspectRatio(landmarks, RIGHT_EAR)) / 2;
     const openness = Math.max(0, Math.min(1, ear / 0.3));
     this.opennessEma = this.opennessEma * 0.85 + openness * 0.15;
 
@@ -271,12 +273,9 @@ export class FaceCueTracker {
       if (now - this.faceSeenAt >= BASELINE_MS && this.baselineSamples.length >= 20) {
         const n = this.baselineSamples.length;
         this.baseline = {
-          blinkRate:
-            this.baselineSamples.reduce((s, x) => s + x.blinkRate, 0) / n || 12,
-          headMotion:
-            this.baselineSamples.reduce((s, x) => s + x.headMotion, 0) / n || 0.05,
-          eyeOpenness:
-            this.baselineSamples.reduce((s, x) => s + x.eyeOpenness, 0) / n || 0.7,
+          blinkRate: this.baselineSamples.reduce((s, x) => s + x.blinkRate, 0) / n || 12,
+          headMotion: this.baselineSamples.reduce((s, x) => s + x.headMotion, 0) / n || 0.05,
+          eyeOpenness: this.baselineSamples.reduce((s, x) => s + x.eyeOpenness, 0) / n || 0.7,
         };
         this.baselineSamples = [];
         this.startAnswer();
@@ -305,12 +304,29 @@ export class FaceCueTracker {
 
   private pressure() {
     if (!this.baseline) return Math.min(1, this.motionEma * 4);
-    const blink = Math.max(0, pctChange(this.currentBlinkRate(performance.now()), this.baseline.blinkRate));
+    const blink = Math.max(
+      0,
+      pctChange(this.currentBlinkRate(performance.now()), this.baseline.blinkRate),
+    );
     const head = Math.max(0, pctChange(this.motionEma, this.baseline.headMotion));
     return Math.max(0, Math.min(1, Math.max(blink, head) / 100));
   }
 
-  private liveExtras(now: number): Pick<FaceCueLive, 'blinkRate' | 'pressure' | 'spike' | 'labels' | 'calibrated' | 'calibrating' | 'blinkCount' | 'eyeOpenness' | 'headMotion' | 'mouthMotion'> {
+  private liveExtras(
+    now: number,
+  ): Pick<
+    FaceCueLive,
+    | 'blinkRate'
+    | 'pressure'
+    | 'spike'
+    | 'labels'
+    | 'calibrated'
+    | 'calibrating'
+    | 'blinkCount'
+    | 'eyeOpenness'
+    | 'headMotion'
+    | 'mouthMotion'
+  > {
     return {
       blinkRate: this.currentBlinkRate(now),
       blinkCount: this.blinkCount,

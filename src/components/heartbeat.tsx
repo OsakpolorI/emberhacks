@@ -1,34 +1,29 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX } from 'lucide-react';
-import {
-  HeartbeatAudio,
-  bpmFromTension,
-  tensionFrom,
-} from '@/lib/heartbeat';
+import type { AssessmentPoint } from '@/lib/contracts';
+import { HeartbeatAudio, hasGroundedConcern, targetBpm } from '@/lib/heartbeat';
 
 export function HeartStage({
   active,
-  suspicionScore,
-  facePressure,
-  spike,
-  pending,
+  assessment,
+  restingBpm,
+  reactionBpm,
+  volume,
   question,
   label,
 }: {
   active: boolean;
-  suspicionScore: number | null | undefined;
-  facePressure: number;
-  spike: boolean;
-  pending: boolean;
+  assessment: AssessmentPoint | undefined;
+  restingBpm: number;
+  reactionBpm: number;
+  volume: number;
   question: string;
   label: string;
 }) {
   const audio = useRef<HeartbeatAudio | null>(null);
-  const [muted, setMuted] = useState(false);
-  const tension = tensionFrom({ suspicionScore, facePressure, spike, pending });
-  const bpm = bpmFromTension(tension);
-  const beatMs = Math.round(60000 / bpm);
+  const target = targetBpm(assessment, restingBpm, reactionBpm);
+  const [bpm, setBpm] = useState(restingBpm);
+  const concern = hasGroundedConcern(assessment);
 
   useEffect(() => {
     const engine = new HeartbeatAudio();
@@ -38,15 +33,23 @@ export function HeartStage({
       audio.current = null;
     };
   }, []);
-
   useEffect(() => {
-    audio.current?.setTension(tension);
-  }, [tension]);
-
+    const timer = setInterval(
+      () =>
+        setBpm((current) => {
+          if (current === target) return current;
+          return current + Math.sign(target - current) * Math.min(2, Math.abs(target - current));
+        }),
+      250,
+    );
+    return () => clearInterval(timer);
+  }, [target]);
   useEffect(() => {
-    audio.current?.setMuted(muted);
-  }, [muted]);
-
+    audio.current?.setBpm(bpm);
+  }, [bpm]);
+  useEffect(() => {
+    audio.current?.setVolume(volume);
+  }, [volume]);
   useEffect(() => {
     const engine = audio.current;
     if (!engine) return;
@@ -55,11 +58,14 @@ export function HeartStage({
     return () => engine.stop();
   }, [active]);
 
+  const tension = concern
+    ? Math.max(0.35, Math.min(1, (bpm - restingBpm) / Math.max(1, reactionBpm)))
+    : 0;
   return (
     <section
-      className={`heart-stage tension-${Math.min(4, Math.floor(tension * 4))} ${spike ? 'spiking' : ''}`}
-      aria-label="Reactive heartbeat stage"
-      style={{ ['--beat' as string]: `${beatMs}ms` }}
+      className={`heart-stage tension-${Math.min(4, Math.floor(tension * 4))} ${concern ? 'spiking' : ''}`}
+      aria-label="Simulated evidence pulse"
+      style={{ ['--beat' as string]: `${Math.round(60000 / bpm)}ms` }}
     >
       <div className="heart-glow" />
       <div className="heart-rings" aria-hidden>
@@ -75,10 +81,10 @@ export function HeartStage({
       <div className="heart-readout">
         <div className="heart-bpm">
           <strong>{active ? bpm : '—'}</strong>
-          <span>BPM</span>
+          <span>SIMULATED BPM</span>
         </div>
         <div className="heart-meter">
-          <span>Tension</span>
+          <span>Evidence tension</span>
           <div className="heart-meter-track">
             <i style={{ width: `${Math.round(tension * 100)}%` }} />
           </div>
@@ -86,19 +92,9 @@ export function HeartStage({
         <p className="heart-label">{label}</p>
         <p className="heart-question">{question}</p>
         <p className="heart-disclaimer">
-          Theatrical pulse from suspicion + face cues — not medical or proof of lying.
+          The pulse reacts to cited story concerns only. It is not your measured heart rate.
         </p>
       </div>
-      <button
-        className="heart-mute"
-        type="button"
-        aria-pressed={muted}
-        onClick={() => setMuted((m) => !m)}
-        title={muted ? 'Unmute heartbeat' : 'Mute heartbeat'}
-      >
-        {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-        {muted ? 'Muted' : 'Pulse audio'}
-      </button>
     </section>
   );
 }

@@ -21,6 +21,7 @@ import {
   liveAssessmentSchema,
 } from '@/lib/live-assessment';
 import type { FaceCueAnswerSummary } from '@/lib/face-cues';
+import { defaultSoundSettings, type SoundSettings } from '@/lib/sound-settings';
 
 class AnalysisError extends Error {
   constructor(
@@ -48,12 +49,17 @@ async function analyze(item: AnalyzeRequest, signal: AbortSignal): Promise<Asses
     model: body.model,
   };
 }
-export function useRound() {
+export function useRound(sound: SoundSettings = defaultSoundSettings) {
   const [state, dispatch] = useReducer(roundReducer, undefined, () => emptyRound());
   const current = useRef(state);
   const [mode, setModeState] = useState<InputMode>('auto');
   const [stream, setStream] = useState<MediaStream | null>(null);
   const live = useRef<LiveInterview | null>(null);
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  useEffect(() => {
+    live.current?.setVoiceVolume(sound.voiceVolume);
+  }, [sound.voiceVolume]);
   const queue = useRef<LatestQueue<AnalyzeRequest, AssessmentPoint> | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const connectionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -149,13 +155,22 @@ export function useRound() {
     // Transcript and Live tool events can arrive in either order. If the
     // content assessment already landed, deliver the queued behavioral cue
     // immediately; otherwise acceptLiveAssessment will flush it later.
-    if (speaker === 'player' && finished && pendingFace.current?.elevated && lastLive.current) {
+    if (
+      speaker === 'player' &&
+      finished &&
+      pendingFace.current?.elevated &&
+      lastLive.current?.covered === playerSignature(current.current.turns)
+    ) {
       live.current?.sendBehavioralCue(pendingFace.current.prompt);
       pendingFace.current = null;
     }
   }
   function flushPendingFaceCue() {
-    if (!pendingFace.current?.elevated || !lastLive.current) return;
+    if (
+      !pendingFace.current?.elevated ||
+      lastLive.current?.covered !== playerSignature(current.current.turns)
+    )
+      return;
     live.current?.sendBehavioralCue(pendingFace.current.prompt);
     pendingFace.current = null;
   }
@@ -223,6 +238,7 @@ export function useRound() {
           const utterance = new SpeechSynthesisUtterance(result.spokenSummary);
           utterance.lang = 'en-US';
           utterance.rate = 1;
+          utterance.volume = soundRef.current.voiceVolume;
           window.speechSynthesis.speak(utterance);
         }
         return;
@@ -244,8 +260,11 @@ export function useRound() {
             },
             id,
           );
-          if (fallback && 'speechSynthesis' in window)
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(fallback.spokenSummary));
+          if (fallback && 'speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(fallback.spokenSummary);
+            utterance.volume = soundRef.current.voiceVolume;
+            window.speechSynthesis.speak(utterance);
+          }
           return;
         }
       }
@@ -293,169 +312,173 @@ export function useRound() {
       },
       8000,
     );
-    const engine = new LiveInterview(mode, {
-      camera: (camera) => {
-        if (current.current.id !== id) return;
-        setStream(camera);
-        patch({ camera: !!camera }, id);
-      },
-      frame: () => {
-        frameCount++;
-        if (current.current.id === id) patch({ cameraFrames: frameCount }, id);
-      },
-      cues: (liveCues) => {
-        if (current.current.id !== id || current.current.phase !== 'interviewing') return;
-        const now = performance.now();
-        if (now - lastCuePatch.current < 120 && !liveCues.spike) return;
-        lastCuePatch.current = now;
-        patch(
-          {
-            face: {
-              ...liveCues,
-              lastNote: liveCues.spike
-                ? liveCues.labels.join(' · ') || current.current.face.lastNote
-                : current.current.face.lastNote,
-            },
-          },
-          id,
-        );
-      },
-      error: (message) => {
-        if (
-          current.current.id !== id ||
-          !['connecting', 'interviewing'].includes(current.current.phase)
-        )
-          return;
-        patch({ phase: 'error', error: message, aiSpeaking: false }, id);
-        clearInterval(timer.current);
-        queue.current?.close();
-        engine.stop();
-      },
-      signal: (level, speaking, aiSpeaking, meter) => {
-        if (current.current.id !== id || current.current.phase !== 'interviewing') return;
-        const now = performance.now();
-        if (now - signalTime < 100) return;
-        signalTime = now;
-        patch(
-          {
-            signals: [
-              ...current.current.signals,
-              {
-                timestamp: (Date.now() - current.current.startedAt) / 1000,
-                level,
-                speaking,
-                aiSpeaking,
+    const engine = new LiveInterview(
+      mode,
+      {
+        camera: (camera) => {
+          if (current.current.id !== id) return;
+          setStream(camera);
+          patch({ camera: !!camera }, id);
+        },
+        frame: () => {
+          frameCount++;
+          if (current.current.id === id) patch({ cameraFrames: frameCount }, id);
+        },
+        cues: (liveCues) => {
+          if (current.current.id !== id || current.current.phase !== 'interviewing') return;
+          const now = performance.now();
+          if (now - lastCuePatch.current < 120 && !liveCues.spike) return;
+          lastCuePatch.current = now;
+          patch(
+            {
+              face: {
+                ...liveCues,
+                lastNote: liveCues.spike
+                  ? liveCues.labels.join(' · ') || current.current.face.lastNote
+                  : current.current.face.lastNote,
               },
-            ].slice(-2000),
-            aiSpeaking,
-            speechMs: meter.speechMs,
-            silenceMs: meter.silenceMs,
-            latencies: [...meter.latencies],
-          },
-          id,
-        );
-      },
-      message: (message) => {
-        // Live can send transcripts before start() finishes setting up media.
-        if (
-          current.current.id !== id ||
-          !['connecting', 'interviewing'].includes(current.current.phase)
-        )
-          return;
-        const c = message.serverContent;
-        if (c?.inputTranscription)
-          addText('player', c.inputTranscription.text ?? '', !!c.inputTranscription.finished);
-        if (c?.outputTranscription) {
-          patch({
-            turns: current.current.turns.map((t) =>
-              t.speaker === 'player' && !t.completed
-                ? { ...t, completed: true, endedAt: current.current.elapsed }
-                : t,
-            ),
-          });
-          addText('gemini', c.outputTranscription.text ?? '', !!c.outputTranscription.finished);
-        }
-        if (c?.interrupted)
-          patch({
-            aiSpeaking: false,
-            turns: current.current.turns.map((t) =>
-              t.speaker === 'gemini' && !t.completed
-                ? { ...t, interrupted: true, completed: true, endedAt: current.current.elapsed }
-                : t,
-            ),
-          });
-        if (c?.turnComplete) {
-          patch({
-            turns: current.current.turns.map((t) =>
-              !t.completed ? { ...t, completed: true, endedAt: current.current.elapsed } : t,
-            ),
-          });
-        }
-        // Tools may precede transcription delivery. Retry grounding after each fragment.
-        for (const call of message.toolCall?.functionCalls ?? []) {
-          if (call.name === 'publish_assessment') {
-            const valid = liveAssessmentSchema.safeParse(call.args).success;
-            if (valid) pendingLive.current = call.args;
+            },
+            id,
+          );
+        },
+        error: (message) => {
+          if (
+            current.current.id !== id ||
+            !['connecting', 'interviewing'].includes(current.current.phase)
+          )
+            return;
+          patch({ phase: 'error', error: message, aiSpeaking: false }, id);
+          clearInterval(timer.current);
+          queue.current?.close();
+          engine.stop();
+        },
+        signal: (level, speaking, aiSpeaking, meter) => {
+          if (current.current.id !== id || current.current.phase !== 'interviewing') return;
+          const now = performance.now();
+          if (now - signalTime < 100) return;
+          signalTime = now;
+          patch(
+            {
+              signals: [
+                ...current.current.signals,
+                {
+                  timestamp: (Date.now() - current.current.startedAt) / 1000,
+                  level,
+                  speaking,
+                  aiSpeaking,
+                },
+              ].slice(-2000),
+              aiSpeaking,
+              speechMs: meter.speechMs,
+              silenceMs: meter.silenceMs,
+              latencies: [...meter.latencies],
+            },
+            id,
+          );
+        },
+        message: (message) => {
+          // Live can send transcripts before start() finishes setting up media.
+          if (
+            current.current.id !== id ||
+            !['connecting', 'interviewing'].includes(current.current.phase)
+          )
+            return;
+          const c = message.serverContent;
+          if (c?.inputTranscription)
+            addText('player', c.inputTranscription.text ?? '', !!c.inputTranscription.finished);
+          if (c?.outputTranscription) {
+            patch({
+              turns: current.current.turns.map((t) =>
+                t.speaker === 'player' && !t.completed
+                  ? { ...t, completed: true, endedAt: current.current.elapsed }
+                  : t,
+              ),
+            });
+            addText('gemini', c.outputTranscription.text ?? '', !!c.outputTranscription.finished);
+          }
+          if (c?.interrupted)
+            patch({
+              aiSpeaking: false,
+              turns: current.current.turns.map((t) =>
+                t.speaker === 'gemini' && !t.completed
+                  ? { ...t, interrupted: true, completed: true, endedAt: current.current.elapsed }
+                  : t,
+              ),
+            });
+          if (c?.turnComplete) {
+            patch({
+              turns: current.current.turns.map((t) =>
+                !t.completed ? { ...t, completed: true, endedAt: current.current.elapsed } : t,
+              ),
+            });
+          }
+          // Tools may precede transcription delivery. Retry grounding after each fragment.
+          for (const call of message.toolCall?.functionCalls ?? []) {
+            if (call.name === 'publish_assessment') {
+              const valid = liveAssessmentSchema.safeParse(call.args).success;
+              if (valid) pendingLive.current = call.args;
+              acceptLiveAssessment();
+              engine.session?.sendToolResponse({
+                functionResponses: [
+                  {
+                    id: call.id,
+                    name: call.name,
+                    response: {
+                      status: valid ? 'received' : 'invalid',
+                      instruction: valid
+                        ? [
+                            'Continue with one short reality-testing follow-up. The player ends the round with the End button. The client verifies quotes against the transcript.',
+                            pendingFace.current?.elevated ? pendingFace.current.prompt : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')
+                        : 'Call publish_assessment with every required field and exact quotes.',
+                    },
+                  },
+                ],
+              });
+              continue;
+            }
             acceptLiveAssessment();
+            if (call.name === 'request_verdict') {
+              const allowed = canRequestVerdict(current.current.turns);
+              engine.session?.sendToolResponse({
+                functionResponses: [
+                  {
+                    id: call.id,
+                    name: call.name,
+                    response: {
+                      status: allowed ? 'finalizing' : 'continue',
+                      instruction: allowed
+                        ? 'The app is producing the verdict. Do not speak further.'
+                        : 'Ask at least one follow-up before requesting a verdict.',
+                    },
+                  },
+                ],
+              });
+              if (allowed) void finishRef.current();
+              continue;
+            }
             engine.session?.sendToolResponse({
               functionResponses: [
                 {
                   id: call.id,
                   name: call.name,
                   response: {
-                    status: valid ? 'received' : 'invalid',
-                    instruction: valid
-                      ? [
-                          'Continue with one short reality-testing follow-up. The player ends the round with the End button. The client verifies quotes against the transcript.',
-                          pendingFace.current?.elevated ? pendingFace.current.prompt : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' ')
-                      : 'Call publish_assessment with every required field and exact quotes.',
+                    status: 'continue',
+                    instruction:
+                      'Keep interviewing with one short follow-up. The player ends the round when ready.',
                   },
                 },
               ],
             });
-            continue;
           }
           acceptLiveAssessment();
-          if (call.name === 'request_verdict') {
-            const allowed = canRequestVerdict(current.current.turns);
-            engine.session?.sendToolResponse({
-              functionResponses: [
-                {
-                  id: call.id,
-                  name: call.name,
-                  response: {
-                    status: allowed ? 'finalizing' : 'continue',
-                    instruction: allowed
-                      ? 'The app is producing the verdict. Do not speak further.'
-                      : 'Ask at least one follow-up before requesting a verdict.',
-                  },
-                },
-              ],
-            });
-            if (allowed) void finishRef.current();
-            continue;
-          }
-          engine.session?.sendToolResponse({
-            functionResponses: [
-              {
-                id: call.id,
-                name: call.name,
-                response: {
-                  status: 'continue',
-                  instruction:
-                    'Keep interviewing with one short follow-up. The player ends the round when ready.',
-                },
-              },
-            ],
-          });
-        }
-        acceptLiveAssessment();
-        if (c?.turnComplete && shouldFinish(current.current.elapsed)) void finishRef.current();
+          if (c?.turnComplete && shouldFinish(current.current.elapsed)) void finishRef.current();
+        },
       },
-    });
+      soundRef.current,
+    );
     live.current = engine;
     const startupTimeout = setTimeout(() => {
       if (current.current.id === id && current.current.phase === 'connecting') {

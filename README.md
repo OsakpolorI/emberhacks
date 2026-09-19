@@ -33,14 +33,17 @@ The analyst uses the current Interactions API with Gemini 3.8 Flash and falls ba
 - **Cancel round:** releases capture and resets without a verdict.
 - **Explore a sample:** explicitly labeled fixed illustration; no camera, network inference, or real prediction.
 - Click chart points to inspect their evidence. Click quotes to find their transcript turn.
+- **Settings:** choose the simulated resting pulse and evidence reaction, adjust pulse and Gemini voice volume, and choose Kore or Puck for the next Live round. Preferences stay in this browser.
 - Download a JSON report containing the transcript, assessments and aggregate measurements. It contains no audio/video.
 
 ## How Gemini is central
 
 1. Gemini Live receives audio and camera frames, understands the story, and chooses context-specific follow-ups. It is the interaction loop, not an added chat window.
-2. Browser MediaPipe Face Landmarker summarizes blinks, eye openness, and head motion vs a short baseline. Elevated cues appear on the camera panel and are injected into Gemini's next follow-up instruction as theatrical game flavor (not proof of lying, and not used in evidence quotes).
+2. Browser MediaPipe Face Landmarker summarizes blinks, eye openness, and head motion against a short baseline. Camera frames are sent independently while the optional model loads. Elevated cues appear on the camera panel and can inform Gemini's next follow-up as approximate conversational context, never as evidence of deception.
 3. A separate Gemini analysis call reviews transcript snapshots and returns a JSON assessment. Server validation rejects quotes not found in player speech. The final assessment sees the transcript without prior suspicion scores.
 4. The dashboard separates AI interpretations from measured audio activity and face cues. Response latency and approximate speech rate never mechanically increase suspicion.
+
+The heartbeat is a simulated sound and animation. Its resting tempo remains steady through ordinary speech, camera movement, and pending analysis; only a grounded assessment citing an unresolved contradiction or physically implausible claim raises it. It returns toward rest when that concern is resolved. It is not a heart-rate measurement.
 
 Camera context is used by the interviewer, not a facial lie classifier. Face cues are optional wow signals that can color a spoken question. The suspicion score is an uncalibrated game score. A convincing story may be invented, and an inconsistent story may be true. The app can say insufficient evidence. Do not use it for consequential judgments about people.
 

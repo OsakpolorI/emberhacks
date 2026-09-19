@@ -1,33 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { bpmFromTension, gainFromTension, tensionFrom } from '../src/lib/heartbeat';
+import { hasGroundedConcern, targetBpm } from '../src/lib/heartbeat';
+import type { AssessmentPoint } from '../src/lib/contracts';
 
-describe('heartbeat tension', () => {
-  it('rises with suspicion and face pressure', () => {
-    const calm = tensionFrom({
-      suspicionScore: 10,
-      facePressure: 0.05,
-      spike: false,
-      pending: false,
-    });
-    const hot = tensionFrom({
-      suspicionScore: 90,
-      facePressure: 0.8,
-      spike: true,
-      pending: true,
-    });
-    expect(hot).toBeGreaterThan(calm);
-    expect(bpmFromTension(hot)).toBeGreaterThan(bpmFromTension(calm));
-    expect(gainFromTension(hot)).toBeGreaterThan(gainFromTension(calm));
+const point = (overrides: Partial<AssessmentPoint>): AssessmentPoint => ({
+  suspicionScore: 80,
+  evidenceStrength: 'moderate',
+  verdict: 'likely_bluff',
+  evidence: [
+    {
+      category: 'implausible_claim',
+      claim: 'A literal dragon',
+      quotes: [{ turnId: 'player-1', text: 'I flew on a dragon' }],
+    },
+  ],
+  uncertainty: [],
+  explanation: 'The literal claim is implausible.',
+  spokenSummary: 'Likely bluff.',
+  sequence: 1,
+  timestamp: 10,
+  latencyMs: 0,
+  ...overrides,
+});
+
+describe('simulated evidence pulse', () => {
+  it('stays at rest for pending, absent, weak, or non-substantive assessments', () => {
+    expect(targetBpm(undefined)).toBe(64);
+    expect(
+      targetBpm(
+        point({
+          suspicionScore: 95,
+          evidence: [{ category: 'needs_clarification', claim: 'Unclear', quotes: [] }],
+        }),
+      ),
+    ).toBe(64);
+    expect(targetBpm(point({ suspicionScore: 55 }))).toBe(64);
+    expect(targetBpm(point({ suspicionScore: null }))).toBe(64);
   });
 
-  it('stays bounded', () => {
-    const t = tensionFrom({
-      suspicionScore: 200,
-      facePressure: 2,
-      spike: true,
-      pending: true,
-    });
-    expect(t).toBeLessThanOrEqual(1);
-    expect(t).toBeGreaterThan(0);
+  it('rises only for a cited substantive concern and returns when resolved', () => {
+    expect(hasGroundedConcern(point({}))).toBe(true);
+    expect(targetBpm(point({}))).toBeGreaterThan(64);
+    expect(targetBpm(point({ suspicionScore: 20, verdict: 'insufficient_evidence' }))).toBe(64);
+    expect(targetBpm(point({}), 70, 0)).toBe(70);
   });
 });

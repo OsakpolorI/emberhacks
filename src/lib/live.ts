@@ -3,6 +3,7 @@ import { assessmentTool } from './live-assessment';
 import { FaceCueTracker, type FaceCueAnswerSummary, type FaceCueLive } from './face-cues';
 import { GoogleGenAI, Modality, Type, type Session, type LiveServerMessage } from '@google/genai';
 import { SpeechMeter } from './metrics';
+import type { SoundSettings } from './sound-settings';
 export type InputMode = 'auto' | 'ptt';
 
 function b64(bytes: Uint8Array) {
@@ -21,6 +22,8 @@ export class LiveInterview {
   private worklet: AudioWorkletNode | null = null;
   private streams: MediaStream[] = [];
   private sources = new Set<AudioBufferSourceNode>();
+  private playbackGain: GainNode | null = null;
+  private voiceVolume = 1;
   private nextAudio = 0;
   private frameTimer: ReturnType<typeof setInterval> | undefined;
   private cueTimer: ReturnType<typeof setInterval> | undefined;
@@ -42,8 +45,14 @@ export class LiveInterview {
       cues: (live: FaceCueLive) => void;
       error: (message: string) => void;
     },
+    private sound?: SoundSettings,
   ) {
     this.mode = mode;
+    this.voiceVolume = sound?.voiceVolume ?? 1;
+  }
+  setVoiceVolume(volume: number) {
+    this.voiceVolume = Math.max(0, Math.min(1, volume));
+    if (this.playbackGain) this.playbackGain.gain.value = this.voiceVolume;
   }
   async start() {
     const response = await fetch('/api/live-token', {
@@ -79,6 +88,9 @@ export class LiveInterview {
     }
     const context = new AudioContext();
     this.context = context;
+    this.playbackGain = context.createGain();
+    this.playbackGain.gain.value = this.voiceVolume;
+    this.playbackGain.connect(context.destination);
     await context.resume();
     await context.audioWorklet.addModule('/audio-worklet.js');
     if (this.closed) return;
@@ -131,11 +143,6 @@ export class LiveInterview {
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 480;
-      this.face = await FaceCueTracker.create(video);
-      this.cueTimer = setInterval(() => {
-        if (this.closed || !this.face) return;
-        this.callbacks.cues(this.face.tick());
-      }, 100);
       this.frameTimer = setInterval(() => {
         if (this.closed || video.readyState < 2) return;
         canvas.getContext('2d')?.drawImage(video, 0, 0, 640, 480);
@@ -147,6 +154,15 @@ export class LiveInterview {
         });
         this.callbacks.frame();
       }, 1000);
+      // Visual context and the interview must not wait for the optional face model/CDN.
+      void FaceCueTracker.create(video).then((tracker) => {
+        if (this.closed) {
+          tracker?.close();
+          return;
+        }
+        this.face = tracker;
+        if (tracker) this.cueTimer = setInterval(() => this.callbacks.cues(tracker.tick()), 100);
+      });
     }
     this.session.sendClientContent({
       turns: [
@@ -175,6 +191,9 @@ export class LiveInterview {
       model: this.model,
       config: {
         responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: this.sound?.voiceName ?? 'Kore' } },
+        },
         systemInstruction: INTERVIEWER_PROMPT,
         inputAudioTranscription: {},
         outputAudioTranscription: {},
@@ -294,7 +313,7 @@ export class LiveInterview {
     for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    source.connect(this.playbackGain ?? context.destination);
     const when = Math.max(context.currentTime, this.nextAudio);
     this.nextAudio = when + buffer.duration;
     this.sources.add(source);
@@ -338,6 +357,7 @@ export class LiveInterview {
     this.session?.close();
     this.session = null;
     void this.context?.close().catch(() => {});
+    this.playbackGain = null;
     this.callbacks.camera(null);
   }
 }

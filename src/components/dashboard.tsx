@@ -28,6 +28,8 @@ import { useRound } from '@/hooks/use-round';
 import { SuspicionChart, ActivityChart } from './charts';
 import { EvidenceCards } from './evidence';
 import { HeartStage } from './heartbeat';
+import { hasGroundedConcern } from '@/lib/heartbeat';
+import { defaultSoundSettings, readSoundSettings, saveSoundSettings } from '@/lib/sound-settings';
 import { answeredFollowups, type AssessmentPoint } from '@/lib/contracts';
 
 function time(seconds: number) {
@@ -43,7 +45,8 @@ const verdictLabels = {
   insufficient_evidence: 'The story is still open.',
 };
 export default function Dashboard() {
-  const round = useRound();
+  const [sound, setSound] = useState(defaultSoundSettings);
+  const round = useRound(sound);
   const { state } = round;
   const video = useRef<HTMLVideoElement>(null);
   const [setup, setSetup] = useState(false);
@@ -56,11 +59,16 @@ export default function Dashboard() {
   const [showRadar, setShowRadar] = useState(true);
   const [showTalk, setShowTalk] = useState(true);
   useEffect(() => {
+    setSound(readSoundSettings());
     fetch('/api/setup')
       .then((r) => r.json())
       .then((x) => setConfigured(x.configured))
       .catch(() => setConfigured(false));
   }, []);
+  function updateSound(next: typeof sound) {
+    setSound(next);
+    saveSoundSettings(next);
+  }
   useEffect(() => {
     if (video.current) video.current.srcObject = round.stream;
   }, [round.stream]);
@@ -74,16 +82,16 @@ export default function Dashboard() {
   const evidence = (selected ?? state.final ?? latest)?.evidence ?? [];
   const heartLabel =
     state.phase === 'connecting'
-      ? 'Locking onto your voice and face…'
+      ? 'Connecting to your story…'
       : state.phase === 'finalizing'
-        ? 'Holding the last pulse while evidence settles…'
+        ? 'Reviewing the final evidence…'
         : active
-          ? state.face.spike
-            ? 'Spike detected — listening harder'
+          ? hasGroundedConcern(latest)
+            ? 'Grounded concern in your story'
             : state.assessmentPending
-              ? 'Weighing that answer…'
-              : 'Live pulse'
-          : 'Idle pulse — start when ready';
+              ? 'Checking your answer…'
+              : 'Steady until the evidence changes'
+          : 'Steady pulse — start when ready';
   const meanLatency = state.latencies.length
     ? state.latencies.reduce((a, b) => a + b, 0) / state.latencies.length / 1000
     : null;
@@ -248,11 +256,12 @@ export default function Dashboard() {
             {liveFocus ? (
               <div className="live-column">
                 <HeartStage
+                  key={state.id}
                   active={active || state.phase === 'finalizing'}
-                  suspicionScore={score}
-                  facePressure={state.face.pressure}
-                  spike={state.face.spike}
-                  pending={state.assessmentPending}
+                  assessment={latest}
+                  restingBpm={sound.restingBpm}
+                  reactionBpm={sound.reactionBpm}
+                  volume={sound.heartbeatVolume}
                   question={state.question}
                   label={heartLabel}
                 />
@@ -355,7 +364,7 @@ export default function Dashboard() {
                     {state.camera && (
                       <div className="face-cues compact-cues">
                         <div className="face-pressure">
-                          <span>Face pressure</span>
+                          <span>Face activity</span>
                           <div className="face-pressure-track">
                             <i style={{ width: `${Math.round(state.face.pressure * 100)}%` }} />
                           </div>
@@ -861,6 +870,76 @@ export default function Dashboard() {
                 <Check size={17} /> API key configured
               </div>
             )}
+            <div className="sound-settings">
+              <h3>Sound and pulse</h3>
+              <p>
+                The pulse is simulated. It rises only after Gemini cites a substantive story
+                concern.
+              </p>
+              <label htmlFor="resting-bpm">
+                Resting pulse <b>{sound.restingBpm} BPM</b>
+              </label>
+              <input
+                id="resting-bpm"
+                type="range"
+                min="50"
+                max="90"
+                value={sound.restingBpm}
+                onChange={(e) => updateSound({ ...sound, restingBpm: Number(e.target.value) })}
+              />
+              <label htmlFor="reaction-bpm">
+                Evidence reaction <b>+{sound.reactionBpm} BPM max</b>
+              </label>
+              <input
+                id="reaction-bpm"
+                type="range"
+                min="0"
+                max="40"
+                value={sound.reactionBpm}
+                onChange={(e) => updateSound({ ...sound, reactionBpm: Number(e.target.value) })}
+              />
+              <label htmlFor="heart-volume">
+                Pulse sound <b>{Math.round(sound.heartbeatVolume * 100)}%</b>
+              </label>
+              <input
+                id="heart-volume"
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round(sound.heartbeatVolume * 100)}
+                onChange={(e) =>
+                  updateSound({ ...sound, heartbeatVolume: Number(e.target.value) / 100 })
+                }
+              />
+              <label htmlFor="voice-volume">
+                Gemini and verdict volume <b>{Math.round(sound.voiceVolume * 100)}%</b>
+              </label>
+              <input
+                id="voice-volume"
+                type="range"
+                min="0"
+                max="100"
+                value={Math.round(sound.voiceVolume * 100)}
+                onChange={(e) =>
+                  updateSound({ ...sound, voiceVolume: Number(e.target.value) / 100 })
+                }
+              />
+              <label htmlFor="gemini-voice">Gemini voice</label>
+              <select
+                id="gemini-voice"
+                value={sound.voiceName}
+                onChange={(e) =>
+                  updateSound({ ...sound, voiceName: e.target.value as typeof sound.voiceName })
+                }
+              >
+                <option value="Kore">Kore</option>
+                <option value="Puck">Puck</option>
+              </select>
+              <small>
+                Voice choice takes effect at the start of the next round. Volumes change
+                immediately.
+              </small>
+            </div>
             {setupMessage && (
               <p role="alert" className="error-text">
                 {setupMessage}
@@ -907,8 +986,8 @@ export default function Dashboard() {
                 activity updates locally.
               </li>
               <li>
-                <b>Feel the pulse.</b> The live stage is a reactive heartbeat — tempo and thump rise
-                with suspicion and face cues (theatrical, not proof).
+                <b>Feel the pulse.</b> The simulated tempo rises smoothly when Gemini cites a
+                grounded contradiction or impossible claim. Change its sound in Settings.
               </li>
               <li>
                 <b>Get a thoughtful verdict.</b> Ask as many follow-ups as you like, then tap End

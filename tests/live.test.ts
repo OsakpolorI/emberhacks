@@ -85,6 +85,32 @@ describe('microphone delivery to Gemini', () => {
     expect(setup.config?.realtimeInputConfig?.automaticActivityDetection?.disabled).toBe(false);
     expect(setup.config?.inputAudioTranscription).toEqual({});
     expect(setup.config?.outputAudioTranscription).toEqual({});
+    expect(setup.config?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName).toBe('Kore');
+  });
+
+  it('applies the selected Gemini voice at session start', async () => {
+    engine.stop();
+    engine = new LiveInterview(
+      'auto',
+      {
+        message: vi.fn(),
+        signal: vi.fn(),
+        camera: vi.fn(),
+        frame: vi.fn(),
+        cues: vi.fn(),
+        error: vi.fn(),
+      },
+      {
+        restingBpm: 64,
+        reactionBpm: 32,
+        heartbeatVolume: 0.35,
+        voiceVolume: 0.5,
+        voiceName: 'Puck',
+      },
+    );
+    await engine.start();
+    const setup = harness.connect.mock.calls[0][0] as LiveConnectParameters;
+    expect(setup.config?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName).toBe('Puck');
   });
 
   it('delivers the first quiet microphone chunk during local meter calibration', async () => {
