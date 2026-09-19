@@ -2,7 +2,7 @@
 
 1. Show Tell and explain: “A conversation game where Gemini investigates whether your story holds together.”
 2. Start a real round. Tell a short story you prepared; keep its truth label private from the app.
-3. Let Gemini ask a story-specific follow-up. Point out microphone activity and the stepped AI assessment updates.
+3. Let Gemini ask a story-specific follow-up. Point out microphone activity, face-cue spikes on the camera panel, and the stepped AI assessment updates.
 4. Answer two follow-ups. Click one chart point and its quoted evidence.
 5. End and assess. Show the exact quote comparisons and uncertainty in the final result.
 6. Explain Gemini's roles: real-time multimodal interviewer and independent transcript evidence analyst. Mention that timing is observation, not proof.

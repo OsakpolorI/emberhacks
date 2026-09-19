@@ -46,6 +46,20 @@ export type AssessmentPoint = Assessment & {
   model?: string;
 };
 export type Signal = { timestamp: number; level: number; speaking: boolean; aiSpeaking: boolean };
+export type FaceCueState = {
+  tracking: boolean;
+  calibrated: boolean;
+  calibrating: boolean;
+  blinkRate: number;
+  blinkCount: number;
+  eyeOpenness: number;
+  headMotion: number;
+  mouthMotion: number;
+  pressure: number;
+  spike: boolean;
+  labels: string[];
+  lastNote: string | null;
+};
 export type Phase = 'ready' | 'connecting' | 'interviewing' | 'finalizing' | 'result' | 'error';
 export type RoundState = {
   id: string;
@@ -62,12 +76,27 @@ export type RoundState = {
   aiSpeaking: boolean;
   camera: boolean;
   cameraFrames: number;
+  face: FaceCueState;
   error: string | null;
   analysisError: string | null;
   assessmentPending: boolean;
   final: Assessment | null;
   preview: boolean;
 };
+export const emptyFace = (): FaceCueState => ({
+  tracking: false,
+  calibrated: false,
+  calibrating: false,
+  blinkRate: 0,
+  blinkCount: 0,
+  eyeOpenness: 0,
+  headMotion: 0,
+  mouthMotion: 0,
+  pressure: 0,
+  spike: false,
+  labels: [],
+  lastNote: null,
+});
 export const emptyRound = (id = ''): RoundState => ({
   id,
   phase: 'ready',
@@ -83,6 +112,7 @@ export const emptyRound = (id = ''): RoundState => ({
   aiSpeaking: false,
   camera: false,
   cameraFrames: 0,
+  face: emptyFace(),
   error: null,
   analysisError: null,
   assessmentPending: false,

@@ -27,6 +27,7 @@ import {
 import { useRound } from '@/hooks/use-round';
 import { SuspicionChart, ActivityChart } from './charts';
 import { EvidenceCards } from './evidence';
+import { HeartStage } from './heartbeat';
 import { answeredFollowups, type AssessmentPoint } from '@/lib/contracts';
 
 function time(seconds: number) {
@@ -52,6 +53,8 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<AssessmentPoint | null>(null);
   const [help, setHelp] = useState(false);
+  const [showRadar, setShowRadar] = useState(true);
+  const [showTalk, setShowTalk] = useState(true);
   useEffect(() => {
     fetch('/api/setup')
       .then((r) => r.json())
@@ -64,9 +67,23 @@ export default function Dashboard() {
   useEffect(() => setSelected(null), [state.id]);
   const active = state.phase === 'interviewing';
   const busy = active || state.phase === 'connecting' || state.phase === 'finalizing';
+  const showAudit = state.phase === 'result' || state.preview;
+  const liveFocus = !showAudit;
   const latest = state.points.at(-1);
   const score = latest?.suspicionScore;
   const evidence = (selected ?? state.final ?? latest)?.evidence ?? [];
+  const heartLabel =
+    state.phase === 'connecting'
+      ? 'Locking onto your voice and face…'
+      : state.phase === 'finalizing'
+        ? 'Holding the last pulse while evidence settles…'
+        : active
+          ? state.face.spike
+            ? 'Spike detected — listening harder'
+            : state.assessmentPending
+              ? 'Weighing that answer…'
+              : 'Live pulse'
+          : 'Idle pulse — start when ready';
   const meanLatency = state.latencies.length
     ? state.latencies.reduce((a, b) => a + b, 0) / state.latencies.length / 1000
     : null;
@@ -225,255 +242,461 @@ export default function Dashboard() {
               </span>
               <span className="meta-divider" />
               <span>
-                {answeredFollowups(state.turns)}{' '}
-                <span className="muted">follow-ups</span>
+                {answeredFollowups(state.turns)} <span className="muted">follow-ups</span>
               </span>
             </div>
           </section>
-          <div className="dashboard-grid">
-            <div className="main-column">
-              <section className="panel suspicion-panel">
-                <div className="panel-heading">
-                  <div className="section-title">
-                    <span className="little-icon">
-                      <Activity size={17} />
-                    </span>
-                    <h2>The suspicion trail</h2>
-                    <span className="tiny-label">AI ASSESSMENT</span>
-                  </div>
-                  <span className="updated">
-                    <span className={`mini-dot ${active ? 'green' : ''}`} />
-                    {state.assessmentPending
-                      ? 'Reviewing your latest answer…'
-                      : latest
-                        ? `Updated ${Math.max(0, Math.floor(state.elapsed - latest.timestamp))}s ago`
-                        : 'Awaiting your story'}
-                  </span>
-                </div>
-                <div className="score-row">
-                  <div>
-                    <span className="score">{score ?? '—'}</span>
-                    <span className="score-unit">/ 100</span>
-                    <span className="evidence-strength">
-                      {latest ? `${latest.evidenceStrength} evidence` : 'No assessment yet'}
-                    </span>
-                  </div>
-                  <div className="chart-legend">
-                    <span /> AI suspicion <CircleHelp size={13} />
-                  </div>
-                </div>
-                <SuspicionChart
-                  points={state.points}
-                  elapsed={state.elapsed}
-                  onSelect={setSelected}
+          <div className={`dashboard-grid ${liveFocus ? 'live-focus' : ''}`}>
+            {liveFocus ? (
+              <div className="live-column">
+                <HeartStage
+                  active={active || state.phase === 'finalizing'}
+                  suspicionScore={score}
+                  facePressure={state.face.pressure}
+                  spike={state.face.spike}
+                  pending={state.assessmentPending}
+                  question={state.question}
+                  label={heartLabel}
                 />
-                <div className="chart-footnote">
-                  <ShieldCheck size={14} />
-                  <span>An evidence-based game score. Not a probability or a lie detector.</span>
-                  <span className="right-label">LOW ← SUSPICION → HIGH</span>
-                </div>
-                {state.analysisError && (
-                  <div className="analysis-warning">
-                    {state.analysisError} · Last assessment retained.
-                  </div>
-                )}
-              </section>
-              <section className="panel activity-panel">
-                <div className="panel-heading">
-                  <div className="section-title">
-                    <span className="little-icon mint">
-                      <AudioLines size={17} />
+                <section className="panel live-trail-panel" aria-live="polite">
+                  <div className="panel-heading">
+                    <div className="section-title">
+                      <span className="little-icon">
+                        <Activity size={17} />
+                      </span>
+                      <h2>Live evidence trail</h2>
+                      <span className="tiny-label">CONTENT REVIEW</span>
+                    </div>
+                    <span className={`updated ${state.assessmentPending ? 'pending' : ''}`}>
+                      <span className={`mini-dot ${active ? 'green' : ''}`} />
+                      {state.assessmentPending
+                        ? 'Gemini is reading that answer…'
+                        : latest
+                          ? `Updated ${Math.max(0, Math.floor(state.elapsed - latest.timestamp))}s ago`
+                          : 'Waiting for your first answer'}
                     </span>
-                    <h2>Your voice, in the moment</h2>
                   </div>
-                  <span className="tiny-label">MEASURED LOCALLY</span>
-                </div>
-                <div className="waveform-row">
-                  <Mic size={16} />
-                  <ActivityChart signals={state.signals} />
-                  <span className="live-label">{active ? 'LIVE' : 'STANDBY'}</span>
-                </div>
-                <div className="metric-grid">
-                  <div>
-                    <span className="metric-label">
-                      <Clock3 size={13} /> Response time
-                    </span>
-                    <strong>
-                      {meanLatency === null ? '—' : meanLatency.toFixed(1)}
-                      <small>{meanLatency !== null ? 's' : ''}</small>
-                    </strong>
-                    <span className="metric-caption">After the question finishes</span>
-                  </div>
-                  <div>
-                    <span className="metric-label">
-                      <Waves size={13} /> Speaking pace
-                    </span>
-                    <strong>
-                      {wpm ?? '—'}
-                      <small>{wpm !== null ? 'wpm' : ''}</small>
-                    </strong>
-                    <span className="metric-caption">Approximate, active speech</span>
-                  </div>
-                  <div>
-                    <span className="metric-label">
-                      <Mic size={13} /> Speaking time
-                    </span>
-                    <strong>
-                      {state.speechMs ? Math.round(state.speechMs / 1000) : '—'}
-                      <small>{state.speechMs ? 's' : ''}</small>
-                    </strong>
-                    <span className="metric-caption">Excludes Gemini playback</span>
-                  </div>
-                </div>
-                <div className="subtle-note">
-                  Patterns, not proof. Speech measurements don’t determine your score.
-                </div>
-              </section>
-            </div>
-            <aside className="side-column">
-              <section className="panel player-panel">
-                <div className="panel-heading">
-                  <div className="section-title">
-                    <h2>In the frame</h2>
-                  </div>
-                  <span className={`device-badge ${state.camera ? 'connected' : ''}`}>
-                    <Camera size={12} />
-                    {state.camera ? 'CAMERA ON' : 'CAMERA OFF'}
-                  </span>
-                </div>
-                <div className={`camera-window ${state.camera ? 'has-camera' : ''}`}>
-                  <video ref={video} autoPlay muted playsInline aria-label="Your camera preview" />
-                  {!state.camera && (
-                    <div className="camera-placeholder">
-                      <div className="camera-orbit">
-                        <Camera size={28} strokeWidth={1.3} />
+                  <div className="live-trail-summary">
+                    <div className="live-score-block">
+                      <span className="eyebrow">AI SUSPICION</span>
+                      <div>
+                        <strong>{score ?? '—'}</strong>
+                        <span>/ 100</span>
                       </div>
-                      <strong>A little face-to-face.</strong>
-                      <span>
-                        {state.preview
-                          ? 'Sample mode uses no camera.'
-                          : 'Your camera preview appears here.'}
+                      <small>
+                        {latest ? `${latest.evidenceStrength} evidence` : 'No assessment yet'}
+                      </small>
+                    </div>
+                    <div className="live-read-block">
+                      <span className="eyebrow">LATEST READ</span>
+                      <p>
+                        {latest?.explanation ??
+                          'Your first completed answer will create a grounded read here.'}
+                      </p>
+                      {latest?.evidence[0] && (
+                        <button
+                          className="live-quote"
+                          onClick={() => quote(latest.evidence[0].quotes[0]?.turnId)}
+                        >
+                          <span>{latest.evidence[0].category.replaceAll('_', ' ')}</span>“
+                          {latest.evidence[0].quotes[0]?.text}”
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="live-chart-wrap">
+                    <SuspicionChart
+                      points={state.points}
+                      elapsed={state.elapsed}
+                      onSelect={setSelected}
+                    />
+                  </div>
+                  <div className="live-trail-footnote">
+                    <ShieldCheck size={14} /> The score follows spoken content and cited evidence.
+                    Face and voice cues stay separate observations.
+                  </div>
+                </section>
+                <div className="live-side-row">
+                  <section className="panel player-panel compact-player">
+                    <div className="panel-heading">
+                      <div className="section-title">
+                        <h2>In the frame</h2>
+                      </div>
+                      <span className={`device-badge ${state.camera ? 'connected' : ''}`}>
+                        <Camera size={12} />
+                        {state.camera ? 'CAMERA ON' : 'CAMERA OFF'}
                       </span>
                     </div>
-                  )}
-                  <span className="camera-corner top-left" />
-                  <span className="camera-corner top-right" />
-                  <span className="camera-corner bottom-left" />
-                  <span className="camera-corner bottom-right" />
-                  {state.camera && (
-                    <span className="camera-caption">YOU · {state.cameraFrames} frames shared</span>
-                  )}
-                </div>
-                <div className="camera-footer">
-                  <span>
-                    <span className={`mini-dot ${state.camera ? 'green' : ''}`} />
-                    {state.camera
-                      ? 'Visual context connected'
-                      : active
-                        ? 'Audio-only session'
-                        : 'Connect when you start'}
-                  </span>
-                  <span>01 / PLAYER</span>
-                </div>
-              </section>
-              <section className="panel interviewer-panel">
-                <div className="ai-avatar">
-                  <Sparkles size={24} />
-                  <span />
-                </div>
-                <span className="eyebrow">MEET YOUR INTERVIEWER</span>
-                <h3>Curious by design.</h3>
-                <p className="current-question">{state.question}</p>
-                <div className="ai-status">
-                  <span className={`mini-dot ${active ? 'green' : ''}`} />
-                  {active
-                    ? state.aiSpeaking
-                      ? 'Gemini is speaking'
-                      : 'Gemini is listening'
-                    : state.phase === 'finalizing'
-                      ? 'Gemini is reviewing the evidence'
-                      : 'Gemini is ready to listen'}
-                </div>
-                <div className="input-mode">
-                  <button
-                    className={round.mode === 'auto' ? 'active' : ''}
-                    disabled={state.phase === 'connecting'}
-                    onClick={() => round.setMode('auto')}
-                  >
-                    <Radio size={13} /> Hands-free
-                  </button>
-                  <button
-                    className={round.mode === 'ptt' ? 'active' : ''}
-                    disabled={state.phase === 'connecting'}
-                    onClick={() => round.setMode('ptt')}
-                  >
-                    <Mic size={13} /> Push to talk
-                  </button>
-                </div>
-                {active && round.mode === 'ptt' && (
-                  <button
-                    className="hold-button"
-                    onPointerDown={(e) => {
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      round.press();
-                    }}
-                    onPointerUp={round.release}
-                    onPointerCancel={round.release}
-                    onLostPointerCapture={round.release}
-                    onBlur={round.release}
-                    onKeyDown={(e) => {
-                      if (e.key === ' ' || e.key === 'Enter') {
-                        e.preventDefault();
-                        round.press();
-                      }
-                    }}
-                    onKeyUp={round.release}
-                  >
-                    Hold to speak
-                  </button>
-                )}
-                {busy ? (
-                  <button
-                    className="primary-button"
-                    disabled={state.phase !== 'interviewing'}
-                    onClick={round.finish}
-                  >
-                    {active ? (
-                      <>
-                        <Square size={14} /> End & assess
-                      </>
-                    ) : (
-                      <>
-                        <span className="spinner" />
-                        {state.phase === 'connecting' ? 'Connecting…' : 'Assessing…'}
-                      </>
+                    <div
+                      className={`camera-window ${state.camera ? 'has-camera' : ''} ${state.face.spike ? 'cue-spike' : ''} ${state.face.pressure > 0.45 ? 'cue-hot' : ''}`}
+                    >
+                      <video
+                        ref={video}
+                        autoPlay
+                        muted
+                        playsInline
+                        aria-label="Your camera preview"
+                      />
+                      {!state.camera && (
+                        <div className="camera-placeholder">
+                          <div className="camera-orbit">
+                            <Camera size={28} strokeWidth={1.3} />
+                          </div>
+                          <strong>A little face-to-face.</strong>
+                          <span>Your camera preview appears here.</span>
+                        </div>
+                      )}
+                      {state.camera && state.face.labels.length > 0 && state.face.spike && (
+                        <div className="face-cue-chip" aria-live="polite">
+                          {state.face.labels.map((label) => (
+                            <span key={label}>{label}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {state.camera && (
+                      <div className="face-cues compact-cues">
+                        <div className="face-pressure">
+                          <span>Face pressure</span>
+                          <div className="face-pressure-track">
+                            <i style={{ width: `${Math.round(state.face.pressure * 100)}%` }} />
+                          </div>
+                        </div>
+                        <div className="cue-observation">
+                          <span className="eyebrow">BEHAVIOR CUES</span>
+                          <p>
+                            {state.face.lastNote ??
+                              (state.face.calibrating
+                                ? 'Calibrating a personal baseline…'
+                                : 'Near baseline')}
+                          </p>
+                          <small>Game flavor only. Never used to decide the suspicion score.</small>
+                        </div>
+                      </div>
                     )}
-                  </button>
-                ) : (
+                  </section>
+                  <section className="panel interviewer-panel live-controls">
+                    <span className="eyebrow">CONTROLS</span>
+                    <div className="ai-status">
+                      <span className={`mini-dot ${active ? 'green' : ''}`} />
+                      {active
+                        ? state.aiSpeaking
+                          ? 'Gemini is speaking'
+                          : 'Gemini is listening'
+                        : state.phase === 'finalizing'
+                          ? 'Gemini is reviewing the evidence'
+                          : state.phase === 'connecting'
+                            ? 'Connecting…'
+                            : 'Ready to listen'}
+                    </div>
+                    <div className="input-mode">
+                      <button
+                        className={round.mode === 'auto' ? 'active' : ''}
+                        disabled={state.phase === 'connecting'}
+                        onClick={() => round.setMode('auto')}
+                      >
+                        <Radio size={13} /> Hands-free
+                      </button>
+                      <button
+                        className={round.mode === 'ptt' ? 'active' : ''}
+                        disabled={state.phase === 'connecting'}
+                        onClick={() => round.setMode('ptt')}
+                      >
+                        <Mic size={13} /> Push to talk
+                      </button>
+                    </div>
+                    {active && round.mode === 'ptt' && (
+                      <button
+                        className="hold-button"
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          round.press();
+                        }}
+                        onPointerUp={round.release}
+                        onPointerCancel={round.release}
+                        onLostPointerCapture={round.release}
+                        onBlur={round.release}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            round.press();
+                          }
+                        }}
+                        onKeyUp={round.release}
+                      >
+                        Hold to speak
+                      </button>
+                    )}
+                    {busy ? (
+                      <button
+                        className="primary-button"
+                        disabled={state.phase !== 'interviewing'}
+                        onClick={round.finish}
+                      >
+                        {active ? (
+                          <>
+                            <Square size={14} /> End & assess
+                          </>
+                        ) : (
+                          <>
+                            <span className="spinner" />
+                            {state.phase === 'connecting' ? 'Connecting…' : 'Assessing…'}
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        className="primary-button"
+                        onClick={() => {
+                          if (configured === false) setSetup(true);
+                          else void round.start();
+                        }}
+                      >
+                        <Play size={16} fill="currentColor" />
+                        Start your investigation
+                        <ArrowRight size={16} />
+                      </button>
+                    )}
+                    {busy && (
+                      <button className="text-button" onClick={round.reset}>
+                        Cancel round
+                      </button>
+                    )}
+                    <span className="privacy-note">
+                      <ShieldCheck size={12} /> Media streams to Gemini during your round.
+                    </span>
+                  </section>
+                </div>
+                <div className="live-optionals">
                   <button
-                    className="primary-button"
-                    onClick={() => {
-                      if (configured === false) setSetup(true);
-                      else void round.start();
-                    }}
+                    className={`optional-toggle ${showRadar ? 'open' : ''}`}
+                    onClick={() => setShowRadar((v) => !v)}
                   >
-                    <Play size={16} fill="currentColor" />
-                    {state.phase === 'ready' || state.preview
-                      ? 'Start your investigation'
-                      : 'Start a new investigation'}
-                    <ArrowRight size={16} />
+                    <AudioLines size={15} /> Voice radar <ChevronDown size={14} />
                   </button>
-                )}
-                {busy && (
-                  <button className="text-button" onClick={round.reset}>
-                    Cancel round
+                  {showRadar && (
+                    <section className="panel activity-panel optional-panel">
+                      <div className="waveform-row">
+                        <Mic size={16} />
+                        <ActivityChart signals={state.signals} />
+                        <span className="live-label">{active ? 'LIVE' : 'STANDBY'}</span>
+                      </div>
+                      <div className="metric-grid">
+                        <div>
+                          <span className="metric-label">Response time</span>
+                          <strong>
+                            {meanLatency === null ? '—' : meanLatency.toFixed(1)}
+                            <small>{meanLatency !== null ? 's' : ''}</small>
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="metric-label">Speaking pace</span>
+                          <strong>
+                            {wpm ?? '—'}
+                            <small>{wpm !== null ? 'wpm' : ''}</small>
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="metric-label">Speaking time</span>
+                          <strong>
+                            {state.speechMs ? Math.round(state.speechMs / 1000) : '—'}
+                            <small>{state.speechMs ? 's' : ''}</small>
+                          </strong>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                  <button
+                    className={`optional-toggle ${showTalk ? 'open' : ''}`}
+                    onClick={() => setShowTalk((v) => !v)}
+                  >
+                    <Headphones size={15} /> Live conversation{' '}
+                    <span className="count-badge">{state.turns.length}</span>
+                    <ChevronDown size={14} />
                   </button>
-                )}
-                <span className="privacy-note">
-                  <ShieldCheck size={12} /> Media streams to Gemini during your round.
-                </span>
-              </section>
-            </aside>
+                  {showTalk && (
+                    <section className="panel transcript-panel optional-panel">
+                      <div className="transcript-list compact-transcript" aria-live="polite">
+                        {!state.turns.length ? (
+                          <div className="empty-section">
+                            <strong>Conversation appears as you speak.</strong>
+                          </div>
+                        ) : (
+                          state.turns.map((turn) => (
+                            <article
+                              className={`transcript-turn ${turn.speaker}`}
+                              id={`turn-${turn.id}`}
+                              key={turn.id}
+                            >
+                              <div className="speaker-icon">
+                                {turn.speaker === 'gemini' ? (
+                                  <Sparkles size={15} />
+                                ) : (
+                                  <span>Y</span>
+                                )}
+                              </div>
+                              <div>
+                                <header>
+                                  <b>{turn.speaker === 'gemini' ? 'Gemini' : 'You'}</b>
+                                  <time>{time(turn.startedAt)}</time>
+                                </header>
+                                <p>{turn.text}</p>
+                              </div>
+                            </article>
+                          ))
+                        )}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="main-column">
+                  <section className="panel suspicion-panel">
+                    <div className="panel-heading">
+                      <div className="section-title">
+                        <span className="little-icon">
+                          <Activity size={17} />
+                        </span>
+                        <h2>The suspicion trail</h2>
+                        <span className="tiny-label">AI ASSESSMENT</span>
+                      </div>
+                      <span className="updated">
+                        <span className={`mini-dot ${active ? 'green' : ''}`} />
+                        {latest
+                          ? `Updated ${Math.max(0, Math.floor(state.elapsed - latest.timestamp))}s ago`
+                          : 'Awaiting your story'}
+                      </span>
+                    </div>
+                    <div className="score-row">
+                      <div>
+                        <span className="score">{score ?? '—'}</span>
+                        <span className="score-unit">/ 100</span>
+                        <span className="evidence-strength">
+                          {latest ? `${latest.evidenceStrength} evidence` : 'No assessment yet'}
+                        </span>
+                      </div>
+                      <div className="chart-legend">
+                        <span /> AI suspicion <CircleHelp size={13} />
+                      </div>
+                    </div>
+                    <SuspicionChart
+                      points={state.points}
+                      elapsed={state.elapsed}
+                      onSelect={setSelected}
+                    />
+                    <div className="chart-footnote">
+                      <ShieldCheck size={14} />
+                      <span>
+                        An evidence-based game score. Not a probability or a lie detector.
+                      </span>
+                    </div>
+                    {state.analysisError && (
+                      <div className="analysis-warning">
+                        {state.analysisError} · Last assessment retained.
+                      </div>
+                    )}
+                  </section>
+                  <section className="panel activity-panel">
+                    <div className="panel-heading">
+                      <div className="section-title">
+                        <span className="little-icon mint">
+                          <AudioLines size={17} />
+                        </span>
+                        <h2>Your voice, in the moment</h2>
+                      </div>
+                      <span className="tiny-label">MEASURED LOCALLY</span>
+                    </div>
+                    <div className="waveform-row">
+                      <Mic size={16} />
+                      <ActivityChart signals={state.signals} />
+                      <span className="live-label">{active ? 'LIVE' : 'STANDBY'}</span>
+                    </div>
+                    <div className="metric-grid">
+                      <div>
+                        <span className="metric-label">
+                          <Clock3 size={13} /> Response time
+                        </span>
+                        <strong>
+                          {meanLatency === null ? '—' : meanLatency.toFixed(1)}
+                          <small>{meanLatency !== null ? 's' : ''}</small>
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="metric-label">
+                          <Waves size={13} /> Speaking pace
+                        </span>
+                        <strong>
+                          {wpm ?? '—'}
+                          <small>{wpm !== null ? 'wpm' : ''}</small>
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="metric-label">
+                          <Mic size={13} /> Speaking time
+                        </span>
+                        <strong>
+                          {state.speechMs ? Math.round(state.speechMs / 1000) : '—'}
+                          <small>{state.speechMs ? 's' : ''}</small>
+                        </strong>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <aside className="side-column">
+                  <section className="panel player-panel">
+                    <div className="panel-heading">
+                      <div className="section-title">
+                        <h2>In the frame</h2>
+                      </div>
+                      <span className={`device-badge ${state.camera ? 'connected' : ''}`}>
+                        <Camera size={12} />
+                        {state.camera ? 'CAMERA ON' : 'CAMERA OFF'}
+                      </span>
+                    </div>
+                    <div className={`camera-window ${state.camera ? 'has-camera' : ''}`}>
+                      <video
+                        ref={video}
+                        autoPlay
+                        muted
+                        playsInline
+                        aria-label="Your camera preview"
+                      />
+                      {!state.camera && (
+                        <div className="camera-placeholder">
+                          <div className="camera-orbit">
+                            <Camera size={28} strokeWidth={1.3} />
+                          </div>
+                          <strong>Sample / review frame</strong>
+                          <span>
+                            {state.preview
+                              ? 'Sample mode uses no camera.'
+                              : 'Camera was used during the live round.'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                  <section className="panel interviewer-panel">
+                    <span className="eyebrow">ROUND COMPLETE</span>
+                    <h3>Review the audit below.</h3>
+                    <p className="current-question">{state.question}</p>
+                    <button
+                      className="primary-button"
+                      onClick={() => {
+                        if (configured === false) setSetup(true);
+                        else void round.start();
+                      }}
+                    >
+                      <Play size={16} fill="currentColor" />
+                      Start a new investigation
+                      <ArrowRight size={16} />
+                    </button>
+                  </section>
+                </aside>
+              </>
+            )}
           </div>
           {state.phase === 'result' && !state.preview && (
             <section className="panel verdict-panel" aria-live="polite">
@@ -500,91 +723,88 @@ export default function Dashboard() {
               </button>
             </section>
           )}
-          <div className="bottom-grid">
-            <section className="panel transcript-panel">
-              <div className="panel-heading">
-                <div className="section-title">
-                  <span className="little-icon">
-                    <Headphones size={16} />
-                  </span>
-                  <h2>The conversation</h2>
-                  <span className="count-badge">{state.turns.length}</span>
-                </div>
-                <button
-                  className="icon-button"
-                  disabled={!state.turns.length}
-                  onClick={exportReport}
-                  aria-label="Download transcript and report"
-                >
-                  <ArrowDownToLine size={16} />
-                </button>
-              </div>
-              <div className="transcript-list" aria-live="polite">
-                {!state.turns.length ? (
-                  <div className="empty-section">
-                    <div className="empty-lines">
-                      <i />
-                      <i />
-                      <i />
-                    </div>
-                    <strong>A good story starts with a conversation.</strong>
-                    <p>Your words and Gemini’s questions will appear here.</p>
+          {showAudit && (
+            <div className="bottom-grid">
+              <section className="panel transcript-panel">
+                <div className="panel-heading">
+                  <div className="section-title">
+                    <span className="little-icon">
+                      <Headphones size={16} />
+                    </span>
+                    <h2>The conversation</h2>
+                    <span className="count-badge">{state.turns.length}</span>
                   </div>
-                ) : (
-                  state.turns.map((turn) => (
-                    <article
-                      className={`transcript-turn ${turn.speaker}`}
-                      id={`turn-${turn.id}`}
-                      key={turn.id}
-                    >
-                      <div className="speaker-icon">
-                        {turn.speaker === 'gemini' ? <Sparkles size={15} /> : <span>Y</span>}
-                      </div>
-                      <div>
-                        <header>
-                          <b>{turn.speaker === 'gemini' ? 'Gemini' : 'You'}</b>
-                          <time>{time(turn.startedAt)}</time>
-                          {!turn.completed && <span className="transcribing">transcribing</span>}
-                        </header>
-                        <p>{turn.text}</p>
-                        {turn.interrupted && <small>Interrupted</small>}
-                      </div>
-                    </article>
-                  ))
-                )}
-              </div>
-            </section>
-            <section className="panel evidence-panel">
-              <div className="panel-heading">
-                <div className="section-title">
-                  <span className="little-icon amber">
-                    <GitEvidence />
-                  </span>
-                  <h2>What stands out</h2>
-                  <span className="count-badge">{evidence.length}</span>
-                </div>
-                {selected && (
-                  <button className="text-button" onClick={() => setSelected(null)}>
-                    Latest <ChevronDown size={13} />
+                  <button
+                    className="icon-button"
+                    disabled={!state.turns.length}
+                    onClick={exportReport}
+                    aria-label="Download transcript and report"
+                  >
+                    <ArrowDownToLine size={16} />
                   </button>
-                )}
-              </div>
-              {evidence.length ? (
-                <EvidenceCards cards={evidence} onQuote={quote} />
-              ) : (
-                <div className="empty-section">
-                  <div className="evidence-empty-icon">
-                    <ShieldCheck size={27} strokeWidth={1.4} />
-                  </div>
-                  <strong>Evidence, before assumptions.</strong>
-                  <p>Specific details and quoted comparisons will appear as your story unfolds.</p>
                 </div>
-              )}
-              <div className="evidence-footer">
-                <Check size={12} /> Every quote is checked against your transcript.
-              </div>
-            </section>
-          </div>
+                <div className="transcript-list" aria-live="polite">
+                  {!state.turns.length ? (
+                    <div className="empty-section">
+                      <strong>A good story starts with a conversation.</strong>
+                      <p>Your words and Gemini’s questions will appear here.</p>
+                    </div>
+                  ) : (
+                    state.turns.map((turn) => (
+                      <article
+                        className={`transcript-turn ${turn.speaker}`}
+                        id={`turn-${turn.id}`}
+                        key={turn.id}
+                      >
+                        <div className="speaker-icon">
+                          {turn.speaker === 'gemini' ? <Sparkles size={15} /> : <span>Y</span>}
+                        </div>
+                        <div>
+                          <header>
+                            <b>{turn.speaker === 'gemini' ? 'Gemini' : 'You'}</b>
+                            <time>{time(turn.startedAt)}</time>
+                            {!turn.completed && <span className="transcribing">transcribing</span>}
+                          </header>
+                          <p>{turn.text}</p>
+                          {turn.interrupted && <small>Interrupted</small>}
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+              <section className="panel evidence-panel">
+                <div className="panel-heading">
+                  <div className="section-title">
+                    <span className="little-icon amber">
+                      <GitEvidence />
+                    </span>
+                    <h2>What stands out</h2>
+                    <span className="count-badge">{evidence.length}</span>
+                  </div>
+                  {selected && (
+                    <button className="text-button" onClick={() => setSelected(null)}>
+                      Latest <ChevronDown size={13} />
+                    </button>
+                  )}
+                </div>
+                {evidence.length ? (
+                  <EvidenceCards cards={evidence} onQuote={quote} />
+                ) : (
+                  <div className="empty-section">
+                    <div className="evidence-empty-icon">
+                      <ShieldCheck size={27} strokeWidth={1.4} />
+                    </div>
+                    <strong>Evidence, before assumptions.</strong>
+                    <p>Specific details and quoted comparisons appear in the final audit.</p>
+                  </div>
+                )}
+                <div className="evidence-footer">
+                  <Check size={12} /> Every quote is checked against your transcript.
+                </div>
+              </section>
+            </div>
+          )}
           <footer className="page-footer">
             <span>
               <Fingerprint size={15} /> tell · Built for EmberHacks 2026
@@ -689,8 +909,13 @@ export default function Dashboard() {
                 activity updates locally.
               </li>
               <li>
+                <b>Feel the pulse.</b> The live stage is a reactive heartbeat — tempo and thump rise
+                with suspicion and face cues (theatrical, not proof).
+              </li>
+              <li>
                 <b>Get a thoughtful verdict.</b> Ask as many follow-ups as you like, then tap End
-                &amp; assess. Soft three-minute cap. Inconclusive is a valid answer.
+                &amp; assess for the full audit trail. Soft three-minute cap. Inconclusive is a
+                valid answer.
               </li>
             </ol>
             <p>

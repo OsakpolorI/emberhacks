@@ -33,6 +33,9 @@ vi.mock('../src/lib/live', () => ({
     setMode = vi.fn();
     press = vi.fn();
     release = vi.fn();
+    notePlayerAnswerStart = vi.fn();
+    finalizePlayerAnswer = vi.fn(() => null);
+    sendBehavioralCue = vi.fn();
   },
 }));
 const reply = () =>

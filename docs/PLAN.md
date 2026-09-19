@@ -2,7 +2,7 @@
 
 ## Product
 
-Single-round Gemini voice/camera bluff investigation. Bright premium dashboard; continuous local speech activity; stepped, evidence-backed AI suspicion score; final likely bluff / likely truthful / insufficient evidence. No role assignment or truth reveal. Gemini is not a validated lie detector. Predictions remain uncalibrated.
+Single-round Gemini voice/camera bluff investigation. Bright premium dashboard; continuous local speech activity; MediaPipe face cues (blinks/head motion) as theatrical follow-up flavor; stepped, evidence-backed AI suspicion score; final likely bluff / likely truthful / insufficient evidence. No role assignment or truth reveal. Gemini is not a validated lie detector. Predictions remain uncalibrated.
 
 ## Architecture
 

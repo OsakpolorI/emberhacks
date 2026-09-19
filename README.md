@@ -38,10 +38,11 @@ The analyst uses the current Interactions API with Gemini 3.8 Flash and falls ba
 ## How Gemini is central
 
 1. Gemini Live receives audio and camera frames, understands the story, and chooses context-specific follow-ups. It is the interaction loop, not an added chat window.
-2. A separate Gemini analysis call reviews transcript snapshots and returns a JSON assessment. Server validation rejects quotes not found in player speech. The final assessment sees the transcript without prior suspicion scores.
-3. The dashboard separates AI interpretations from measured audio activity. Response latency and approximate speech rate never mechanically increase suspicion.
+2. Browser MediaPipe Face Landmarker summarizes blinks, eye openness, and head motion vs a short baseline. Elevated cues appear on the camera panel and are injected into Gemini's next follow-up instruction as theatrical game flavor (not proof of lying, and not used in evidence quotes).
+3. A separate Gemini analysis call reviews transcript snapshots and returns a JSON assessment. Server validation rejects quotes not found in player speech. The final assessment sees the transcript without prior suspicion scores.
+4. The dashboard separates AI interpretations from measured audio activity and face cues. Response latency and approximate speech rate never mechanically increase suspicion.
 
-Camera context is used by the interviewer, not a facial lie classifier. The suspicion score is an uncalibrated game score. A convincing story may be invented, and an inconsistent story may be true. The app can say insufficient evidence. Do not use it for consequential judgments about people.
+Camera context is used by the interviewer, not a facial lie classifier. Face cues are optional wow signals that can color a spoken question. The suspicion score is an uncalibrated game score. A convincing story may be invented, and an inconsistent story may be true. The app can say insufficient evidence. Do not use it for consequential judgments about people.
 
 ## Data and local security
 
@@ -49,7 +50,7 @@ Microphone audio and camera frames go to Google during active rounds. Transcript
 
 ## Stack
 
-Next.js, React, TypeScript, Tailwind CSS, Recharts, Lucide, Zod, Google GenAI SDK, Web Audio AudioWorklet, MediaDevices, browser speech synthesis, Vitest. Laptop webcam and microphone. Amazfit is not integrated.
+Next.js, React, TypeScript, Tailwind CSS, Recharts, Lucide, Zod, Google GenAI SDK, MediaPipe Face Landmarker (`@mediapipe/tasks-vision`), Web Audio AudioWorklet, MediaDevices, browser speech synthesis, Vitest. Laptop webcam and microphone. Amazfit is not integrated.
 
 ## Collaboration
 

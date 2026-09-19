@@ -19,6 +19,7 @@ import {
   playerSignature,
   liveAssessmentSchema,
 } from '@/lib/live-assessment';
+import type { FaceCueAnswerSummary } from '@/lib/face-cues';
 
 class AnalysisError extends Error {
   constructor(
@@ -63,6 +64,8 @@ export function useRound() {
   const lastLive = useRef<{ point: AssessmentPoint; covered: string } | null>(null);
   const lastSpeechAt = useRef(0);
   const finishRef = useRef<() => Promise<void>>(async () => {});
+  const pendingFace = useRef<FaceCueAnswerSummary | null>(null);
+  const lastCuePatch = useRef(0);
   function patch(patch: Partial<RoundState>, id = current.current.id) {
     if (id !== current.current.id) return;
     current.current = { ...current.current, ...patch };
@@ -83,6 +86,7 @@ export function useRound() {
     setStream(null);
     pendingLive.current = null;
     lastLive.current = null;
+    pendingFace.current = null;
   }
   useEffect(
     () => () => {
@@ -111,6 +115,7 @@ export function useRound() {
         interrupted: false,
       };
       turns.push(turn);
+      if (speaker === 'player') live.current?.notePlayerAnswerStart();
     }
     if (turn) {
       turn.text += text;
@@ -119,11 +124,39 @@ export function useRound() {
         turn.endedAt = s.elapsed;
       }
     }
+    let faceNote: string | null = null;
+    if (speaker === 'player' && finished) {
+      const summary = live.current?.finalizePlayerAnswer() ?? null;
+      pendingFace.current = summary;
+      if (summary?.elevated) faceNote = summary.labels.join(' · ');
+    }
     patch({
       turns,
       ...(speaker === 'player' && text ? { assessmentPending: true } : {}),
       ...(speaker === 'gemini' && turn ? { question: turn.text } : {}),
+      ...(faceNote
+        ? {
+            face: {
+              ...current.current.face,
+              spike: true,
+              labels: pendingFace.current?.labels ?? current.current.face.labels,
+              lastNote: faceNote,
+            },
+          }
+        : {}),
     });
+    // Transcript and Live tool events can arrive in either order. If the
+    // content assessment already landed, deliver the queued behavioral cue
+    // immediately; otherwise acceptLiveAssessment will flush it later.
+    if (speaker === 'player' && finished && pendingFace.current?.elevated && lastLive.current) {
+      live.current?.sendBehavioralCue(pendingFace.current.prompt);
+      pendingFace.current = null;
+    }
+  }
+  function flushPendingFaceCue() {
+    if (!pendingFace.current?.elevated || !lastLive.current) return;
+    live.current?.sendBehavioralCue(pendingFace.current.prompt);
+    pendingFace.current = null;
   }
   function acceptLiveAssessment() {
     if (!pendingLive.current) return;
@@ -131,7 +164,10 @@ export function useRound() {
     if (!assessment) return;
     const covered = playerSignature(current.current.turns);
     pendingLive.current = null;
-    if (lastLive.current?.covered === covered) return;
+    if (lastLive.current?.covered === covered) {
+      flushPendingFaceCue();
+      return;
+    }
     const point: AssessmentPoint = {
       ...assessment,
       sequence: ++sequence.current,
@@ -145,6 +181,7 @@ export function useRound() {
       analysisError: null,
       assessmentPending: false,
     });
+    flushPendingFaceCue();
   }
   async function finish() {
     const s = current.current;
@@ -265,6 +302,23 @@ export function useRound() {
         frameCount++;
         if (current.current.id === id) patch({ cameraFrames: frameCount }, id);
       },
+      cues: (liveCues) => {
+        if (current.current.id !== id || current.current.phase !== 'interviewing') return;
+        const now = performance.now();
+        if (now - lastCuePatch.current < 120 && !liveCues.spike) return;
+        lastCuePatch.current = now;
+        patch(
+          {
+            face: {
+              ...liveCues,
+              lastNote: liveCues.spike
+                ? liveCues.labels.join(' · ') || current.current.face.lastNote
+                : current.current.face.lastNote,
+            },
+          },
+          id,
+        );
+      },
       error: (message) => {
         if (
           current.current.id !== id ||
@@ -350,7 +404,12 @@ export function useRound() {
                   response: {
                     status: valid ? 'received' : 'invalid',
                     instruction: valid
-                      ? 'Continue with one short reality-testing follow-up. The player ends the round with the End button. The client verifies quotes against the transcript.'
+                      ? [
+                          'Continue with one short reality-testing follow-up. The player ends the round with the End button. The client verifies quotes against the transcript.',
+                          pendingFace.current?.elevated ? pendingFace.current.prompt : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')
                       : 'Call publish_assessment with every required field and exact quotes.',
                   },
                 },

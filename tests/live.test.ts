@@ -69,6 +69,7 @@ beforeEach(() => {
     signal: vi.fn(),
     camera: vi.fn(),
     frame: vi.fn(),
+    cues: vi.fn(),
     error: vi.fn(),
   });
 });

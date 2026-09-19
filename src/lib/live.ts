@@ -1,5 +1,6 @@
 import { INTERVIEWER_PROMPT } from './reasoning-policy';
 import { assessmentTool } from './live-assessment';
+import { FaceCueTracker, type FaceCueAnswerSummary, type FaceCueLive } from './face-cues';
 import { GoogleGenAI, Modality, type Session, type LiveServerMessage } from '@google/genai';
 import { SpeechMeter } from './metrics';
 export type InputMode = 'auto' | 'ptt';
@@ -22,7 +23,9 @@ export class LiveInterview {
   private sources = new Set<AudioBufferSourceNode>();
   private nextAudio = 0;
   private frameTimer: ReturnType<typeof setInterval> | undefined;
+  private cueTimer: ReturnType<typeof setInterval> | undefined;
   private video: HTMLVideoElement | null = null;
+  private face: FaceCueTracker | null = null;
   private ai = false;
   constructor(
     mode: InputMode,
@@ -31,6 +34,7 @@ export class LiveInterview {
       signal: (level: number, speaking: boolean, ai: boolean, meter: SpeechMeter) => void;
       camera: (stream: MediaStream | null) => void;
       frame: () => void;
+      cues: (live: FaceCueLive) => void;
       error: (message: string) => void;
     },
   ) {
@@ -164,6 +168,11 @@ export class LiveInterview {
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 480;
+      this.face = await FaceCueTracker.create(video);
+      this.cueTimer = setInterval(() => {
+        if (this.closed || !this.face) return;
+        this.callbacks.cues(this.face.tick());
+      }, 100);
       this.frameTimer = setInterval(() => {
         if (this.closed || video.readyState < 2) return;
         canvas.getContext('2d')?.drawImage(video, 0, 0, 640, 480);
@@ -181,6 +190,19 @@ export class LiveInterview {
         { role: 'user', parts: [{ text: 'Begin the interview with your opening question.' }] },
       ],
       turnComplete: true,
+    });
+  }
+  notePlayerAnswerStart() {
+    this.face?.startAnswer();
+  }
+  finalizePlayerAnswer(): FaceCueAnswerSummary | null {
+    return this.face?.endAnswer() ?? null;
+  }
+  sendBehavioralCue(text: string) {
+    if (this.closed || !this.session) return;
+    this.session.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: false,
     });
   }
   private endAudioStream() {
@@ -243,6 +265,9 @@ export class LiveInterview {
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.frameTimer);
+    clearInterval(this.cueTimer);
+    this.face?.close();
+    this.face = null;
     this.clearPlayback();
     this.worklet?.disconnect();
     if (this.worklet) this.worklet.port.onmessage = null;
