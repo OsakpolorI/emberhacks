@@ -16,7 +16,7 @@ Shared contracts: src/lib/contracts.ts. Live adapter: src/lib/live.ts. Evidence 
 
 ## State and limits
 
-Ready -> connecting -> interviewing -> finalizing -> result; recoverable error can assess captured words or restart. Unlimited follow-ups; the player ends with End & assess. Three-minute soft cap at turn boundary; 190-second hard cap. One analysis in flight, newest queued snapshot wins. Reset invalidates prior responses. End stops all media/timers/audio and closes the socket before final analysis.
+Ready -> connecting -> interviewing -> finalizing -> result; recoverable error can assess captured words or restart. Open-ended: unlimited follow-ups, the player ends with End & assess, or Gemini may call request_verdict once it judges the story explored (after the initial story and at least one follow-up). 30-minute safety ceiling only, not a game rule. Live sessions use context window compression and session resumption (reconnecting on GoAway/unexpected close) since audio+video sessions otherwise cap at 2 minutes. One analysis in flight, newest queued snapshot wins. Reset invalidates prior responses. End stops all media/timers/audio and closes the socket before final analysis.
 
 ## Evidence
 

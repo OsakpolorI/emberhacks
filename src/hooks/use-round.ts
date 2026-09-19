@@ -2,6 +2,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   assessmentSchema,
+  canRequestVerdict,
   emptyRound,
   roundReducer,
   shouldFinish,
@@ -418,7 +419,25 @@ export function useRound() {
             continue;
           }
           acceptLiveAssessment();
-          // Ending is player-controlled via End & assess; ignore request_verdict.
+          if (call.name === 'request_verdict') {
+            const allowed = canRequestVerdict(current.current.turns);
+            engine.session?.sendToolResponse({
+              functionResponses: [
+                {
+                  id: call.id,
+                  name: call.name,
+                  response: {
+                    status: allowed ? 'finalizing' : 'continue',
+                    instruction: allowed
+                      ? 'The app is producing the verdict. Do not speak further.'
+                      : 'Ask at least one follow-up before requesting a verdict.',
+                  },
+                },
+              ],
+            });
+            if (allowed) void finishRef.current();
+            continue;
+          }
           engine.session?.sendToolResponse({
             functionResponses: [
               {
@@ -434,8 +453,7 @@ export function useRound() {
           });
         }
         acceptLiveAssessment();
-        if (c?.turnComplete && shouldFinish(current.current.turns, current.current.elapsed, true))
-          void finishRef.current();
+        if (c?.turnComplete && shouldFinish(current.current.elapsed)) void finishRef.current();
       },
     });
     live.current = engine;
@@ -464,10 +482,9 @@ export function useRound() {
         if (current.current.id !== id || current.current.phase !== 'interviewing') return;
         const elapsed = (Date.now() - current.current.startedAt) / 1000;
         patch({ elapsed }, id);
-        if (shouldFinish(current.current.turns, elapsed, false)) {
+        if (shouldFinish(elapsed)) {
           limitReachedAt ||= Date.now();
           if (
-            elapsed >= 190 ||
             lastLive.current?.covered === playerSignature(current.current.turns) ||
             Date.now() - limitReachedAt >= 10000
           ) {

@@ -237,9 +237,7 @@ export default function Dashboard() {
             </div>
             <div className="session-meta">
               <Clock3 size={14} />
-              <span>
-                {time(state.elapsed)} <span className="muted">/ 03:00</span>
-              </span>
+              <span>{time(state.elapsed)}</span>
               <span className="meta-divider" />
               <span>
                 {answeredFollowups(state.turns)} <span className="muted">follow-ups</span>

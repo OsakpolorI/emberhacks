@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { groundAssessment, insufficient } from '../src/lib/analysis';
 import {
+  canRequestVerdict,
   emptyRound,
   roundReducer,
   shouldFinish,
@@ -74,19 +75,14 @@ describe('round boundaries', () => {
     const state = emptyRound('new');
     expect(roundReducer(state, { type: 'patch', id: 'old', patch: { error: 'late' } })).toBe(state);
   });
-  it('finalizes at time cap and next boundary', () => {
-    expect(shouldFinish([], 180, false)).toBe(false);
-    expect(shouldFinish([], 180, true)).toBe(true);
-    expect(shouldFinish([], 190, false)).toBe(true);
+  it('only finalizes past the safety ceiling', () => {
+    expect(shouldFinish(1799)).toBe(false);
+    expect(shouldFinish(1800)).toBe(true);
   });
-  it('does not stop from follow-up count alone', () =>
-    expect(
-      shouldFinish(
-        Array.from({ length: 8 }, (_, i) => ({ ...turns[0], id: `p${i}` })),
-        50,
-        false,
-      ),
-    ).toBe(false));
+  it('requires at least one answered follow-up before a verdict', () => {
+    expect(canRequestVerdict(turns.slice(0, 1))).toBe(false);
+    expect(canRequestVerdict(turns)).toBe(true);
+  });
 });
 describe('single-flight analysis', () => {
   it('coalesces to newest snapshot without overlap', async () => {
