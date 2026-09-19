@@ -1,6 +1,6 @@
 import { INTERVIEWER_PROMPT } from './reasoning-policy';
 import { assessmentTool } from './live-assessment';
-import { GoogleGenAI, Modality, type Session, type LiveServerMessage } from '@google/genai';
+import { GoogleGenAI, Modality, Type, type Session, type LiveServerMessage } from '@google/genai';
 import { SpeechMeter } from './metrics';
 export type InputMode = 'auto' | 'ptt';
 
@@ -24,6 +24,11 @@ export class LiveInterview {
   private frameTimer: ReturnType<typeof setInterval> | undefined;
   private video: HTMLVideoElement | null = null;
   private ai = false;
+  private genai: GoogleGenAI | null = null;
+  private model = '';
+  private resumeHandle: string | undefined;
+  private generation = 0;
+  private reconnecting = false;
   constructor(
     mode: InputMode,
     private callbacks: {
@@ -73,51 +78,9 @@ export class LiveInterview {
     await context.resume();
     await context.audioWorklet.addModule('/audio-worklet.js');
     if (this.closed) return;
-    const ai = new GoogleGenAI({ apiKey: config.token, httpOptions: { apiVersion: 'v1alpha' } });
-    const session = await ai.live.connect({
-      model: config.model,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: INTERVIEWER_PROMPT,
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        realtimeInputConfig: {
-          automaticActivityDetection: {
-            disabled: false,
-            prefixPaddingMs: 300,
-            silenceDurationMs: 800,
-          },
-        },
-        tools: [
-          {
-            functionDeclarations: [assessmentTool],
-          },
-        ],
-      },
-      callbacks: {
-        onmessage: (message) => {
-          if (this.closed) return;
-          const content = message.serverContent;
-          if (content?.interrupted) this.clearPlayback();
-          for (const part of content?.modelTurn?.parts ?? []) {
-            if (part.inlineData?.data) this.play(part.inlineData.data);
-          }
-          this.callbacks.message(message);
-        },
-        onerror: () => {
-          if (!this.closed)
-            this.callbacks.error(
-              'The live connection encountered an error. Assess the captured story or restart.',
-            );
-        },
-        onclose: () => {
-          if (!this.closed)
-            this.callbacks.error(
-              'The live connection closed. You can still assess the captured story.',
-            );
-        },
-      },
-    });
+    this.genai = new GoogleGenAI({ apiKey: config.token, httpOptions: { apiVersion: 'v1alpha' } });
+    this.model = config.model;
+    const session = await this.connect();
     if (this.closed) {
       session.close();
       return;
@@ -182,6 +145,101 @@ export class LiveInterview {
       ],
       turnComplete: true,
     });
+  }
+  private async connect(handle?: string) {
+    if (!this.genai) throw new Error('Live session not started.');
+    const gen = ++this.generation;
+    return this.genai.live.connect({
+      model: this.model,
+      config: {
+        responseModalities: [Modality.AUDIO],
+        systemInstruction: INTERVIEWER_PROMPT,
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            prefixPaddingMs: 300,
+            silenceDurationMs: 800,
+          },
+        },
+        // Live sessions default to a 2-minute cap once video is attached (15
+        // minutes audio-only). Compression keeps an open-ended conversation
+        // viable; resumption survives the ~10-minute websocket reset.
+        contextWindowCompression: { slidingWindow: {} },
+        sessionResumption: { handle },
+        tools: [
+          {
+            functionDeclarations: [
+              assessmentTool,
+              {
+                name: 'request_verdict',
+                description:
+                  'Optionally finish the conversation once it has run its natural course, after the initial story and at least one follow-up have been answered. The player can also end the round anytime with a button.',
+                parameters: { type: Type.OBJECT, properties: {} },
+              },
+            ],
+          },
+        ],
+      },
+      callbacks: {
+        onmessage: (message) => {
+          if (gen !== this.generation) return;
+          this.handleMessage(message);
+        },
+        onerror: () => {
+          if (gen !== this.generation) return;
+          this.handleDisconnect();
+        },
+        onclose: () => {
+          if (gen !== this.generation) return;
+          this.handleDisconnect();
+        },
+      },
+    });
+  }
+  private handleMessage(message: LiveServerMessage) {
+    if (this.closed) return;
+    const content = message.serverContent;
+    if (content?.interrupted) this.clearPlayback();
+    for (const part of content?.modelTurn?.parts ?? []) {
+      if (part.inlineData?.data) this.play(part.inlineData.data);
+    }
+    if (message.sessionResumptionUpdate?.resumable && message.sessionResumptionUpdate.newHandle) {
+      this.resumeHandle = message.sessionResumptionUpdate.newHandle;
+    }
+    // GoAway means the server will disconnect soon; reconnect proactively
+    // with the last resumable handle so the conversation stays uninterrupted.
+    if (message.goAway) void this.reconnect();
+    this.callbacks.message(message);
+  }
+  private handleDisconnect() {
+    if (this.closed || this.reconnecting) return;
+    if (this.resumeHandle) {
+      void this.reconnect();
+      return;
+    }
+    this.callbacks.error('The live connection closed. You can still assess the captured story.');
+  }
+  private async reconnect() {
+    if (this.closed || this.reconnecting) return;
+    this.reconnecting = true;
+    try {
+      const next = await this.connect(this.resumeHandle);
+      if (this.closed) {
+        next.close();
+        return;
+      }
+      this.session?.close();
+      this.session = next;
+    } catch {
+      if (!this.closed)
+        this.callbacks.error(
+          'The live connection could not be resumed. You can still assess the captured story.',
+        );
+    } finally {
+      this.reconnecting = false;
+    }
   }
   private endAudioStream() {
     if (this.closed) return;

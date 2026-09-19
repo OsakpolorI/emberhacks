@@ -5,6 +5,7 @@ import type { LiveInterview } from '../src/lib/live';
 import { useRound } from '../src/hooks/use-round';
 import { insufficient } from '../src/lib/analysis';
 import { dragonAssessment } from './assessment-fixture';
+import { MAX_SESSION_SECONDS } from '../src/lib/contracts';
 
 type Callbacks = ConstructorParameters<typeof LiveInterview>[1];
 const harness = vi.hoisted(() => ({
@@ -210,13 +211,11 @@ describe('actual round lifecycle', () => {
     });
     expect(result.current.state.turns[0].interrupted).toBe(true);
   });
-  it('ignores model request_verdict; only the End button finishes', async () => {
+  it('refuses an early request_verdict, then honors it once a follow-up is answered', async () => {
     const { result } = renderHook(() => useRound());
     await act(() => result.current.start());
     act(() => {
       player();
-      player('We left at five.');
-      player('Then we ate dinner.');
       harness.engines[0].callbacks.message({
         text: undefined,
         data: undefined,
@@ -226,6 +225,15 @@ describe('actual round lifecycle', () => {
     expect(result.current.state.phase).toBe('interviewing');
     expect(fetch).not.toHaveBeenCalled();
     expect(harness.engines[0].session.sendToolResponse).toHaveBeenCalled();
+    act(() => {
+      player('We left at five.');
+      harness.engines[0].callbacks.message({
+        text: undefined,
+        data: undefined,
+        toolCall: { functionCalls: [{ name: 'request_verdict', id: 'tool-2' }] },
+      });
+    });
+    expect(result.current.state.phase).toBe('finalizing');
   });
   it('does not immediately retry an exhausted quota', async () => {
     vi.mocked(fetch).mockResolvedValue(
@@ -245,12 +253,14 @@ describe('actual round lifecycle', () => {
     unmount();
     expect(harness.engines[0].stop).toHaveBeenCalled();
   });
-  it('automatically finalizes at the hard time limit', async () => {
+  it('automatically finalizes at the safety ceiling', async () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useRound());
     await act(() => result.current.start());
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(190000);
+      // Past the ceiling, finish() waits up to 10s for the live assessment to
+      // catch up before forcing a finish; advance past that grace window too.
+      await vi.advanceTimersByTimeAsync(MAX_SESSION_SECONDS * 1000 + 11000);
     });
     expect(result.current.state.phase).toBe('result');
     expect(fetch).toHaveBeenCalledTimes(1);

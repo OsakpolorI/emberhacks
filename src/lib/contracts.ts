@@ -102,6 +102,13 @@ export function answeredFollowups(turns: Turn[]) {
     turns.filter((t) => t.speaker === 'player' && t.completed && t.text.trim()).length - 1,
   );
 }
-export function shouldFinish(_turns: Turn[], elapsed: number, boundary: boolean) {
-  return elapsed >= 190 || (elapsed >= 180 && boundary);
+// Open-ended: the player can end anytime with "End & assess", and Gemini may
+// call request_verdict once it feels the conversation has run its course.
+// MAX_SESSION_SECONDS is only a safety ceiling against a forgotten open tab.
+export const MAX_SESSION_SECONDS = 30 * 60;
+export function shouldFinish(elapsed: number) {
+  return elapsed >= MAX_SESSION_SECONDS;
+}
+export function canRequestVerdict(turns: Turn[]) {
+  return answeredFollowups(turns) >= 1;
 }
