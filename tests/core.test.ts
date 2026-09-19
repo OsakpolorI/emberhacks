@@ -4,7 +4,6 @@ import {
   emptyRound,
   roundReducer,
   shouldFinish,
-  canRequestVerdict,
   type Turn,
 } from '../src/lib/contracts';
 import { previewAssessment, reasoningFixtures } from '../src/lib/fixtures';
@@ -80,18 +79,14 @@ describe('round boundaries', () => {
     expect(shouldFinish([], 180, true)).toBe(true);
     expect(shouldFinish([], 190, false)).toBe(true);
   });
-  it('requires two answered follow-ups', () => {
-    expect(canRequestVerdict(turns)).toBe(false);
-    expect(canRequestVerdict([...turns, { ...turns[0], id: 'p3' }])).toBe(true);
-  });
-  it('stops after four follow-ups', () =>
+  it('does not stop from follow-up count alone', () =>
     expect(
       shouldFinish(
-        Array.from({ length: 5 }, (_, i) => ({ ...turns[0], id: `p${i}` })),
+        Array.from({ length: 8 }, (_, i) => ({ ...turns[0], id: `p${i}` })),
         50,
         false,
       ),
-    ).toBe(true));
+    ).toBe(false));
 });
 describe('single-flight analysis', () => {
   it('coalesces to newest snapshot without overlap', async () => {

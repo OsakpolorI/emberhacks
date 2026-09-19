@@ -1,6 +1,6 @@
 import { INTERVIEWER_PROMPT } from './reasoning-policy';
 import { assessmentTool } from './live-assessment';
-import { GoogleGenAI, Modality, Type, type Session, type LiveServerMessage } from '@google/genai';
+import { GoogleGenAI, Modality, type Session, type LiveServerMessage } from '@google/genai';
 import { SpeechMeter } from './metrics';
 export type InputMode = 'auto' | 'ptt';
 
@@ -90,14 +90,7 @@ export class LiveInterview {
         },
         tools: [
           {
-            functionDeclarations: [
-              assessmentTool,
-              {
-                name: 'request_verdict',
-                description: 'Finish after the initial story and at least two answered follow-ups.',
-                parameters: { type: Type.OBJECT, properties: {} },
-              },
-            ],
+            functionDeclarations: [assessmentTool],
           },
         ],
       },

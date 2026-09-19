@@ -2,7 +2,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   assessmentSchema,
-  canRequestVerdict,
   emptyRound,
   roundReducer,
   shouldFinish,
@@ -351,7 +350,7 @@ export function useRound() {
                   response: {
                     status: valid ? 'received' : 'invalid',
                     instruction: valid
-                      ? 'Continue with one short reality-testing follow-up, or request_verdict if the round is complete. The client verifies quotes against the transcript.'
+                      ? 'Continue with one short reality-testing follow-up. The player ends the round with the End button. The client verifies quotes against the transcript.'
                       : 'Call publish_assessment with every required field and exact quotes.',
                   },
                 },
@@ -360,25 +359,20 @@ export function useRound() {
             continue;
           }
           acceptLiveAssessment();
-          const allowed =
-            call.name === 'request_verdict' &&
-            canRequestVerdict(current.current.turns) &&
-            lastLive.current?.covered === playerSignature(current.current.turns);
+          // Ending is player-controlled via End & assess; ignore request_verdict.
           engine.session?.sendToolResponse({
             functionResponses: [
               {
                 id: call.id,
                 name: call.name,
                 response: {
-                  status: allowed ? 'finalizing' : 'continue',
-                  instruction: allowed
-                    ? 'The app is producing the verdict. Do not speak further.'
-                    : 'At least two follow-ups must be answered. Publish the latest assessment before requesting a verdict.',
+                  status: 'continue',
+                  instruction:
+                    'Keep interviewing with one short follow-up. The player ends the round when ready.',
                 },
               },
             ],
           });
-          if (allowed) void finishRef.current();
         }
         acceptLiveAssessment();
         if (c?.turnComplete && shouldFinish(current.current.turns, current.current.elapsed, true))

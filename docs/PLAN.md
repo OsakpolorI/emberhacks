@@ -16,7 +16,7 @@ Shared contracts: src/lib/contracts.ts. Live adapter: src/lib/live.ts. Evidence 
 
 ## State and limits
 
-Ready -> connecting -> interviewing -> finalizing -> result; recoverable error can assess captured words or restart. Two answered follow-ups before adaptive finish; maximum four. Three-minute soft cap at turn boundary; 190-second hard cap. One analysis in flight, newest queued snapshot wins. Reset invalidates prior responses. End stops all media/timers/audio and closes the socket before final analysis.
+Ready -> connecting -> interviewing -> finalizing -> result; recoverable error can assess captured words or restart. Unlimited follow-ups; the player ends with End & assess. Three-minute soft cap at turn boundary; 190-second hard cap. One analysis in flight, newest queued snapshot wins. Reset invalidates prior responses. End stops all media/timers/audio and closes the socket before final analysis.
 
 ## Evidence
 

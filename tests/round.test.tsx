@@ -210,11 +210,13 @@ describe('actual round lifecycle', () => {
     });
     expect(result.current.state.turns[0].interrupted).toBe(true);
   });
-  it('refuses an early model request to finish', async () => {
+  it('ignores model request_verdict; only the End button finishes', async () => {
     const { result } = renderHook(() => useRound());
     await act(() => result.current.start());
     act(() => {
       player();
+      player('We left at five.');
+      player('Then we ate dinner.');
       harness.engines[0].callbacks.message({
         text: undefined,
         data: undefined,

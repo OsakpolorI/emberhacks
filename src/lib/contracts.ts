@@ -102,9 +102,6 @@ export function answeredFollowups(turns: Turn[]) {
     turns.filter((t) => t.speaker === 'player' && t.completed && t.text.trim()).length - 1,
   );
 }
-export function shouldFinish(turns: Turn[], elapsed: number, boundary: boolean) {
-  return answeredFollowups(turns) >= 4 || elapsed >= 190 || (elapsed >= 180 && boundary);
-}
-export function canRequestVerdict(turns: Turn[]) {
-  return answeredFollowups(turns) >= 2;
+export function shouldFinish(_turns: Turn[], elapsed: number, boundary: boolean) {
+  return elapsed >= 190 || (elapsed >= 180 && boundary);
 }

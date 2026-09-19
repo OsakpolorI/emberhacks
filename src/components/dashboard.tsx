@@ -225,8 +225,8 @@ export default function Dashboard() {
               </span>
               <span className="meta-divider" />
               <span>
-                {Math.min(4, answeredFollowups(state.turns))}{' '}
-                <span className="muted">/ 4 follow-ups</span>
+                {answeredFollowups(state.turns)}{' '}
+                <span className="muted">follow-ups</span>
               </span>
             </div>
           </section>
@@ -689,8 +689,8 @@ export default function Dashboard() {
                 activity updates locally.
               </li>
               <li>
-                <b>Get a thoughtful verdict.</b> Up to four follow-ups, about three minutes.
-                Inconclusive is a valid answer.
+                <b>Get a thoughtful verdict.</b> Ask as many follow-ups as you like, then tap End
+                &amp; assess. Soft three-minute cap. Inconclusive is a valid answer.
               </li>
             </ol>
             <p>
