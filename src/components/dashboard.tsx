@@ -243,9 +243,11 @@ export default function Dashboard() {
                   </div>
                   <span className="updated">
                     <span className={`mini-dot ${active ? 'green' : ''}`} />
-                    {latest
-                      ? `Updated ${Math.max(0, Math.floor(state.elapsed - latest.timestamp))}s ago`
-                      : 'Awaiting your story'}
+                    {state.assessmentPending
+                      ? 'Reviewing your latest answer…'
+                      : latest
+                        ? `Updated ${Math.max(0, Math.floor(state.elapsed - latest.timestamp))}s ago`
+                        : 'Awaiting your story'}
                   </span>
                 </div>
                 <div className="score-row">

@@ -2,6 +2,7 @@ import { Check, CircleHelp, GitCompareArrows, Quote } from 'lucide-react';
 import type { Evidence } from '@/lib/contracts';
 const labels = {
   possible_contradiction: 'Possible contradiction',
+  implausible_claim: 'Implausible claim',
   consistent_detail: 'Consistent detail',
   needs_clarification: 'Needs clarification',
   insufficient_evidence: 'Insufficient evidence',

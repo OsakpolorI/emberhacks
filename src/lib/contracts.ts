@@ -14,6 +14,7 @@ export const evidenceSchema = z.object({
   claim: z.string().max(500),
   category: z.enum([
     'possible_contradiction',
+    'implausible_claim',
     'consistent_detail',
     'needs_clarification',
     'insufficient_evidence',
@@ -63,6 +64,7 @@ export type RoundState = {
   cameraFrames: number;
   error: string | null;
   analysisError: string | null;
+  assessmentPending: boolean;
   final: Assessment | null;
   preview: boolean;
 };
@@ -83,6 +85,7 @@ export const emptyRound = (id = ''): RoundState => ({
   cameraFrames: 0,
   error: null,
   analysisError: null,
+  assessmentPending: false,
   final: null,
   preview: false,
 });

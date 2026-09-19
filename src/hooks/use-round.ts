@@ -14,6 +14,12 @@ import {
 import { LiveInterview, type InputMode } from '@/lib/live';
 import { LatestQueue } from '@/lib/queue';
 import { previewRound } from '@/lib/fixtures';
+import {
+  groundLiveAssessment,
+  liveReviewFallback,
+  playerSignature,
+  liveAssessmentSchema,
+} from '@/lib/live-assessment';
 
 class AnalysisError extends Error {
   constructor(
@@ -54,6 +60,9 @@ export function useRound() {
   const sequence = useRef(0);
   const lastAnalyzed = useRef('');
   const quotaPauseUntil = useRef(0);
+  const pendingLive = useRef<unknown>(null);
+  const lastLive = useRef<{ point: AssessmentPoint; covered: string } | null>(null);
+  const lastSpeechAt = useRef(0);
   const finishRef = useRef<() => Promise<void>>(async () => {});
   function patch(patch: Partial<RoundState>, id = current.current.id) {
     if (id !== current.current.id) return;
@@ -73,6 +82,8 @@ export function useRound() {
     finalController.current?.abort();
     window.speechSynthesis?.cancel();
     setStream(null);
+    pendingLive.current = null;
+    lastLive.current = null;
   }
   useEffect(
     () => () => {
@@ -86,6 +97,7 @@ export function useRound() {
     [],
   );
   function addText(speaker: Turn['speaker'], text: string, finished = false) {
+    if (speaker === 'player' && text) lastSpeechAt.current = Date.now();
     const s = current.current;
     const turns = s.turns.map((t) => ({ ...t }));
     let turn = turns.findLast((t) => t.speaker === speaker && !t.completed && !t.interrupted);
@@ -108,13 +120,38 @@ export function useRound() {
         turn.endedAt = s.elapsed;
       }
     }
-    patch({ turns, ...(speaker === 'gemini' && turn ? { question: turn.text } : {}) });
+    patch({
+      turns,
+      ...(speaker === 'player' && text ? { assessmentPending: true } : {}),
+      ...(speaker === 'gemini' && turn ? { question: turn.text } : {}),
+    });
+  }
+  function acceptLiveAssessment() {
+    if (!pendingLive.current) return;
+    const assessment = groundLiveAssessment(pendingLive.current, current.current.turns);
+    if (!assessment) return;
+    const covered = playerSignature(current.current.turns);
+    pendingLive.current = null;
+    if (lastLive.current?.covered === covered) return;
+    const point: AssessmentPoint = {
+      ...assessment,
+      sequence: ++sequence.current,
+      timestamp: current.current.elapsed,
+      latencyMs: 0,
+      model: 'Gemini Live',
+    };
+    lastLive.current = { point, covered };
+    patch({
+      points: [...current.current.points, point],
+      analysisError: null,
+      assessmentPending: false,
+    });
   }
   async function finish() {
     const s = current.current;
     if (!['interviewing', 'error'].includes(s.phase) || s.preview) return;
     const id = s.id;
-    patch({ phase: 'finalizing', error: null, aiSpeaking: false });
+    patch({ phase: 'finalizing', error: null, aiSpeaking: false, assessmentPending: true });
     clearInterval(timer.current);
     queue.current?.close();
     live.current?.stop();
@@ -141,6 +178,7 @@ export function useRound() {
             final: result,
             points: [...current.current.points, { ...result, timestamp: s.elapsed }],
             analysisError: null,
+            assessmentPending: false,
           },
           id,
         );
@@ -154,14 +192,23 @@ export function useRound() {
       } catch (e) {
         if (controller.signal.aborted || current.current.id !== id) return;
         if (attempt === 1 || (e instanceof AnalysisError && e.status === 429)) {
+          const fallback = lastLive.current
+            ? liveReviewFallback(lastLive.current.point, lastLive.current.covered, s.turns)
+            : null;
           patch(
             {
               phase: 'result',
-              error: e instanceof Error ? e.message : 'Assessment unavailable',
-              final: null,
+              error: fallback ? null : e instanceof Error ? e.message : 'Assessment unavailable',
+              final: fallback,
+              assessmentPending: false,
+              analysisError: fallback
+                ? 'Independent review unavailable; using the validated Live assessment where it covers the complete story.'
+                : null,
             },
             id,
           );
+          if (fallback && 'speechSynthesis' in window)
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(fallback.spokenSummary));
           return;
         }
       }
@@ -186,8 +233,9 @@ export function useRound() {
           );
         return analyze(item, signal);
       },
-      (result) => {
+      (result, item) => {
         if (current.current.id !== id || current.current.phase !== 'interviewing') return;
+        if (result.sequence <= (current.current.points.at(-1)?.sequence ?? -1)) return;
         patch(
           {
             points: [
@@ -195,6 +243,8 @@ export function useRound() {
               { ...result, timestamp: (Date.now() - current.current.startedAt) / 1000 },
             ],
             analysisError: null,
+            assessmentPending:
+              playerSignature(item.turns) !== playerSignature(current.current.turns),
           },
           id,
         );
@@ -286,14 +336,34 @@ export function useRound() {
               !t.completed ? { ...t, completed: true, endedAt: current.current.elapsed } : t,
             ),
           });
-          if (shouldFinish(current.current.turns, current.current.elapsed, true)) {
-            void finishRef.current();
-            return;
-          }
         }
+        // Tools may precede transcription delivery. Retry grounding after each fragment.
         for (const call of message.toolCall?.functionCalls ?? []) {
+          if (call.name === 'publish_assessment') {
+            const valid = liveAssessmentSchema.safeParse(call.args).success;
+            if (valid) pendingLive.current = call.args;
+            acceptLiveAssessment();
+            engine.session?.sendToolResponse({
+              functionResponses: [
+                {
+                  id: call.id,
+                  name: call.name,
+                  response: {
+                    status: valid ? 'received' : 'invalid',
+                    instruction: valid
+                      ? 'Continue with one short reality-testing follow-up, or request_verdict if the round is complete. The client verifies quotes against the transcript.'
+                      : 'Call publish_assessment with every required field and exact quotes.',
+                  },
+                },
+              ],
+            });
+            continue;
+          }
+          acceptLiveAssessment();
           const allowed =
-            call.name === 'request_verdict' && canRequestVerdict(current.current.turns);
+            call.name === 'request_verdict' &&
+            canRequestVerdict(current.current.turns) &&
+            lastLive.current?.covered === playerSignature(current.current.turns);
           engine.session?.sendToolResponse({
             functionResponses: [
               {
@@ -303,13 +373,16 @@ export function useRound() {
                   status: allowed ? 'finalizing' : 'continue',
                   instruction: allowed
                     ? 'The app is producing the verdict. Do not speak further.'
-                    : 'Ask another relevant follow-up; at least two must be answered.',
+                    : 'At least two follow-ups must be answered. Publish the latest assessment before requesting a verdict.',
                 },
               },
             ],
           });
           if (allowed) void finishRef.current();
         }
+        acceptLiveAssessment();
+        if (c?.turnComplete && shouldFinish(current.current.turns, current.current.elapsed, true))
+          void finishRef.current();
       },
     });
     live.current = engine;
@@ -333,13 +406,21 @@ export function useRound() {
       if (current.current.id !== id || engine.closed) return;
       patch({ phase: 'interviewing', startedAt: Date.now() }, id);
       let lastRequest = Date.now();
+      let limitReachedAt = 0;
       timer.current = setInterval(() => {
         if (current.current.id !== id || current.current.phase !== 'interviewing') return;
         const elapsed = (Date.now() - current.current.startedAt) / 1000;
         patch({ elapsed }, id);
         if (shouldFinish(current.current.turns, elapsed, false)) {
-          void finishRef.current();
-          return;
+          limitReachedAt ||= Date.now();
+          if (
+            elapsed >= 190 ||
+            lastLive.current?.covered === playerSignature(current.current.turns) ||
+            Date.now() - limitReachedAt >= 10000
+          ) {
+            void finishRef.current();
+            return;
+          }
         }
         const signature = current.current.turns
           .filter((t) => t.speaker === 'player')
@@ -347,7 +428,9 @@ export function useRound() {
           .join('|');
         if (
           Date.now() >= quotaPauseUntil.current &&
-          Date.now() - lastRequest >= 8000 &&
+          Date.now() - lastRequest >= 20000 &&
+          Date.now() - lastSpeechAt.current >= 12000 &&
+          lastLive.current?.covered !== playerSignature(current.current.turns) &&
           signature &&
           signature !== lastAnalyzed.current
         ) {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveInterview } from '../src/lib/live';
 import { useRound } from '../src/hooks/use-round';
 import { insufficient } from '../src/lib/analysis';
+import { dragonAssessment } from './assessment-fixture';
 
 type Callbacks = ConstructorParameters<typeof LiveInterview>[1];
 const harness = vi.hoisted(() => ({
@@ -69,6 +70,49 @@ function player(text = 'Yesterday I went to the library with my sister and retur
   });
 }
 describe('actual round lifecycle', () => {
+  it('updates the trail from a Live tool without spending a text API request', async () => {
+    const { result } = renderHook(() => useRound());
+    await act(() => result.current.start());
+    act(() => {
+      player('We flew on the dragon to Korea.');
+      harness.engines[0].callbacks.message({
+        text: undefined,
+        data: undefined,
+        toolCall: {
+          functionCalls: [
+            { name: 'publish_assessment', id: 'assessment-1', args: dragonAssessment },
+          ],
+        },
+      });
+    });
+    expect(result.current.state.points.at(-1)?.suspicionScore).toBe(92);
+    expect(result.current.state.assessmentPending).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Quota reached' }), { status: 429 }),
+    );
+    await act(() => result.current.finish());
+    expect(result.current.state.final?.verdict).toBe('likely_bluff');
+    expect(result.current.state.final?.uncertainty[0]).toContain(
+      'Independent final review unavailable',
+    );
+  });
+  it('grounds tools that arrive before the matching input transcript', async () => {
+    const { result } = renderHook(() => useRound());
+    await act(() => result.current.start());
+    act(() =>
+      harness.engines[0].callbacks.message({
+        text: undefined,
+        data: undefined,
+        toolCall: {
+          functionCalls: [{ name: 'publish_assessment', id: 'early', args: dragonAssessment }],
+        },
+      }),
+    );
+    expect(result.current.state.points).toHaveLength(0);
+    act(() => player('We flew on the dragon to Korea.'));
+    expect(result.current.state.points).toHaveLength(1);
+  });
   it('preserves transcripts received while media startup is still connecting', async () => {
     harness.start.mockImplementation(async () => {
       harness.engines[0].callbacks.message({
