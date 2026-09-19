@@ -1,0 +1,21 @@
+name: Build task
+description: Claim a bounded task before agent work starts
+title: "[Task] "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and acceptance gate
+    validations:
+      required: true
+  - type: textarea
+    id: ownership
+    attributes:
+      label: Owner, branch and exclusively owned file paths
+      description: Check active issues for conflicts before claiming.
+    validations:
+      required: true
+  - type: textarea
+    id: handoff
+    attributes:
+      label: Dependencies, shared-contract handoffs, and work-log path

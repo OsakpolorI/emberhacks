@@ -1,0 +1,5 @@
+import 'server-only';
+import { GoogleGenAI } from '@google/genai';
+export function gemini(){const apiKey=process.env.GEMINI_API_KEY;if(!apiKey)throw new Error('KEY_MISSING');return new GoogleGenAI({apiKey});}
+export function localRequest(request:Request){const origin=request.headers.get('origin');const host=request.headers.get('host')||new URL(request.url).host;try{return !origin||new URL(origin).host===host;}catch{return false;}}
+export function apiError(error:unknown){const message=error instanceof Error?error.message:'';if(message==='KEY_MISSING')return Response.json({error:'Gemini is not configured yet. Open Setup to add your API key.'},{status:503});if(/429|RESOURCE_EXHAUSTED/.test(message))return Response.json({error:'Gemini quota reached. Wait a moment or check your project quota.'},{status:429});if(/404|NOT_FOUND/.test(message))return Response.json({error:'The configured Gemini model is unavailable for this API key. Check the model settings.'},{status:503});return Response.json({error:'Gemini could not complete this request. Please retry.'},{status:502});}
