@@ -220,9 +220,7 @@ export default function Dashboard() {
             </div>
             <div className="session-meta">
               <Clock3 size={14} />
-              <span>
-                {time(state.elapsed)} <span className="muted">/ 03:00</span>
-              </span>
+              <span>{time(state.elapsed)}</span>
               <span className="meta-divider" />
               <span>
                 {answeredFollowups(state.turns)}{' '}
@@ -689,8 +687,9 @@ export default function Dashboard() {
                 activity updates locally.
               </li>
               <li>
-                <b>Get a thoughtful verdict.</b> Ask as many follow-ups as you like, then tap End
-                &amp; assess. Soft three-minute cap. Inconclusive is a valid answer.
+                <b>Get a thoughtful verdict.</b> Ask as many follow-ups as you like. Tap End &amp;
+                assess whenever you're ready, or Gemini will wrap up naturally. Inconclusive is a
+                valid answer.
               </li>
             </ol>
             <p>

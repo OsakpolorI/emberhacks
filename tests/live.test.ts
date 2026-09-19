@@ -150,3 +150,55 @@ describe('microphone delivery to Gemini', () => {
     expect(harness.sendRealtimeInput).not.toHaveBeenCalled();
   });
 });
+
+describe('open-ended session resumption', () => {
+  it('requests context window compression, session resumption, and both end tools', async () => {
+    await engine.start();
+    const setup = harness.connect.mock.calls[0][0] as LiveConnectParameters;
+    expect(setup.config?.contextWindowCompression).toEqual({ slidingWindow: {} });
+    expect(setup.config?.sessionResumption).toEqual({ handle: undefined });
+    const tool = setup.config?.tools?.[0] as { functionDeclarations?: { name?: string }[] };
+    const names = tool.functionDeclarations?.map((f) => f.name);
+    expect(names).toEqual(['publish_assessment', 'request_verdict']);
+  });
+
+  it('reconnects with the latest resumable handle on GoAway', async () => {
+    await engine.start();
+    const first = harness.connect.mock.calls[0][0] as LiveConnectParameters;
+    first.callbacks?.onmessage?.({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    } as Parameters<NonNullable<typeof first.callbacks.onmessage>>[0]);
+    first.callbacks?.onmessage?.({
+      goAway: { timeLeft: '5s' },
+    } as Parameters<NonNullable<typeof first.callbacks.onmessage>>[0]);
+    await vi.waitFor(() => expect(harness.connect).toHaveBeenCalledTimes(2));
+    const second = harness.connect.mock.calls[1][0] as LiveConnectParameters;
+    expect(second.config?.sessionResumption).toEqual({ handle: 'handle-1' });
+  });
+
+  it('reconnects on an unexpected close when a resumable handle is known', async () => {
+    await engine.start();
+    const first = harness.connect.mock.calls[0][0] as LiveConnectParameters;
+    first.callbacks?.onmessage?.({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-2' },
+    } as Parameters<NonNullable<typeof first.callbacks.onmessage>>[0]);
+    first.callbacks?.onclose?.({} as CloseEvent);
+    await vi.waitFor(() => expect(harness.connect).toHaveBeenCalledTimes(2));
+  });
+
+  it('reports an error on unexpected close with no resumable handle yet', async () => {
+    const onError = vi.fn();
+    engine = new LiveInterview('auto', {
+      message: vi.fn(),
+      signal: vi.fn(),
+      camera: vi.fn(),
+      frame: vi.fn(),
+      error: onError,
+    });
+    await engine.start();
+    const first = harness.connect.mock.calls[0][0] as LiveConnectParameters;
+    first.callbacks?.onclose?.({} as CloseEvent);
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('closed'));
+    expect(harness.connect).toHaveBeenCalledTimes(1);
+  });
+});
