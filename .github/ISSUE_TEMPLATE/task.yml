@@ -1,6 +1,6 @@
 name: Build task
 description: Claim a bounded task before agent work starts
-title: "[Task] "
+title: '[Task] '
 body:
   - type: textarea
     id: outcome

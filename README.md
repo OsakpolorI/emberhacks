@@ -22,6 +22,8 @@ npm start
 
 No database, account registration, external assets, or paid voice service required. Gemini availability and quota depend on your Google project. Free-tier limits can interrupt a session; the app displays that failure instead of making up a result.
 
+The analyst uses the current Interactions API with Gemini 3.8 Flash and falls back once to Gemini 3.6 Flash on temporary overload, quota errors, or timeouts. The actual model is recorded in each assessment/report. Set `GEMINI_ANALYSIS_FALLBACK` to override it. Quota failures pause live analysis for one minute; they do not generate invented points. Live interviewing uses Gemini 3.8 Live. Standard free-tier model quotas may allow only a small number of practice rounds; no billing is enabled by this app.
+
 ## Controls
 
 - **Start your investigation:** asks permission for microphone and camera; camera denial permits audio-only mode.

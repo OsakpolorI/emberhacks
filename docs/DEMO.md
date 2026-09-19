@@ -10,9 +10,11 @@
 Record two real practice rounds with private truth labels, including one consistent story and one with an unresolved contradiction. A sample UI preview is not a live demo and must be labeled if shown. If the network fails, show a recording clearly labeled “previous recorded run.”
 
 ## Submission description
+
 Tell turns a spoken story into a live investigation. Gemini listens, receives camera context, and asks adaptive follow-up questions. A second Gemini pass updates an evidence-backed suspicion chart and produces a final tentative verdict. Every evidence quote is checked against the transcript, and the interface separates measured speech activity from AI interpretations. Built for a single laptop interaction with no typed chat required.
 
 ## Checklist
+
 - Add the second team member's name and invite their GitHub account.
 - Record the live demo and attach it to the submission.
 - Include the GitHub link, technologies in README, and the explanation of Gemini's interaction loop.
